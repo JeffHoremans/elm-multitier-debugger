@@ -2,3 +2,9 @@
 elm-stuff/
 # elm-repl generated files
 repl-temp-*
+
+# generated files
+*.js
+*.html
+*src/.ClientStarter.elm
+*src/.ServerStarter.elm
