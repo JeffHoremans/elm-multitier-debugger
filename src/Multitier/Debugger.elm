@@ -1,4 +1,4 @@
-module MultitierDebugger exposing (..)
+module Multitier.Debugger exposing (..)
 
 import Html exposing (Html)
 import Multitier exposing (Config, MultitierCmd, MultitierProgram)
