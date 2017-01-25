@@ -2,16 +2,16 @@ module MultitierDebugger exposing (..)
 
 import Html exposing (Html)
 import Multitier exposing (Config, MultitierCmd, MultitierProgram)
-import Multitier.RemoteProcedure as RemoteProcedure exposing (RemoteProcedure)
+import Multitier.RPC as RPC exposing (RPC)
 
 program :
   { config: Config
-  , init : serverState -> ( model, MultitierCmd proc msg )
-  , update : msg -> model -> ( model, MultitierCmd proc msg )
+  , init : serverState -> ( model, MultitierCmd remoteServerMsg msg )
+  , update : msg -> model -> ( model, MultitierCmd remoteServerMsg msg )
   , subscriptions : model -> Sub msg
   , view : model -> Html msg
   , serverState : serverModel -> serverState
-  , procedures : proc -> RemoteProcedure serverModel msg serverMsg
+  , serverRPCs : remoteServerMsg -> RPC serverModel msg serverMsg
   , initServer: (serverModel, Cmd serverMsg)
   , updateServer : serverMsg -> serverModel -> (serverModel, Cmd serverMsg)
   , serverSubscriptions : serverModel -> Sub serverMsg
@@ -24,7 +24,7 @@ program stuff = Multitier.program
     , subscriptions = wrapSubscriptions stuff.subscriptions
     , view = wrapView stuff.view
     , serverState = wrapServerState stuff.serverState
-    , procedures = wrapProcedures stuff.procedures
+    , serverRPCs = wrapServerRPCs stuff.serverRPCs
     , initServer = wrapInitServer stuff.initServer
     , updateServer = wrapUpdateServer stuff.updateServer
     , serverSubscriptions = wrapServerSubscriptions stuff.serverSubscriptions
@@ -47,11 +47,11 @@ wrapUpdateServer updateServer = \serverMsg serverModel -> case serverMsg of
 
 -- PROCEDURE
 
-type Procedure proc = UserProcedure proc
+type RemoteServerMsg remoteServerMsg = UserRemoteServerMsg remoteServerMsg
 
-wrapProcedures : (proc -> RemoteProcedure serverModel msg serverMsg) -> (Procedure proc -> RemoteProcedure (ServerModel serverModel) (Msg msg) (ServerMsg serverMsg))
-wrapProcedures procedures = \procedure -> case procedure of
-  UserProcedure proc -> RemoteProcedure.map UserMsg UserServerMsg (\userModel serverModel -> { serverModel | userModel = userModel}) (\serverModel -> serverModel.userModel) (procedures proc)
+wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg -> RPC (ServerModel serverModel) (Msg msg) (ServerMsg serverMsg))
+wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
+  UserRemoteServerMsg msg -> RPC.map UserMsg UserServerMsg (\userModel serverModel -> { serverModel | userModel = userModel}) (\serverModel -> serverModel.userModel) (serverRPCs msg)
 
 -- SERVER-STATE
 
@@ -69,16 +69,16 @@ wrapServerSubscriptions serverSubscriptions = \serverModel -> Sub.map UserServer
 
 type alias Model model = { userModel: model }
 
-wrapInit : (serverState -> (model, MultitierCmd proc msg)) -> (ServerState serverState -> (Model model, MultitierCmd (Procedure proc) (Msg msg)))
-wrapInit init = \serverState -> let (model, cmd) = init serverState.userState in (Model model, Multitier.map UserProcedure UserMsg cmd)
+wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg)))
+wrapInit init = \serverState -> let (model, cmd) = init serverState.userState in (Model model, Multitier.map UserRemoteServerMsg UserMsg cmd)
 
 type Msg msg = UserMsg msg
 
-wrapUpdate : (msg -> model -> ( model, MultitierCmd proc msg )) -> (Msg msg -> Model model -> ( Model model, MultitierCmd (Procedure proc) (Msg msg) ))
+wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg msg -> Model model -> ( Model model, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg) ))
 wrapUpdate update = \msg model -> case msg of
   UserMsg userMsg ->
     let (userModel, cmd) = update userMsg model.userModel
-    in  (Model userModel, Multitier.map UserProcedure UserMsg cmd)
+    in  (Model userModel, Multitier.map UserRemoteServerMsg UserMsg cmd)
 
 -- SUBSCRIPTIONS
 
