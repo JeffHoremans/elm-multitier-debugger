@@ -40,64 +40,64 @@ program stuff = Multitier.program
 
 -- SERVER-MODEL
 
-type alias ServerModel serverModel = { userModel: serverModel }
+type alias ServerModel serverModel = { appModel: serverModel }
 
 wrapInitServer : ((serverModel, Cmd serverMsg)) -> (((ServerModel serverModel), Cmd (ServerMsg serverMsg)))
-wrapInitServer (serverModel, cmd) = (ServerModel serverModel, Cmd.map UserServerMsg cmd)
+wrapInitServer (serverModel, cmd) = (ServerModel serverModel, Cmd.map ServerAppMsg cmd)
 
-type ServerMsg serverMsg = UserServerMsg serverMsg
+type ServerMsg serverMsg = ServerAppMsg serverMsg
 
 wrapUpdateServer : (serverMsg -> serverModel -> (serverModel, Cmd serverMsg)) -> (ServerMsg serverMsg -> ServerModel serverModel -> (ServerModel serverModel, Cmd (ServerMsg serverMsg)))
 wrapUpdateServer updateServer = \serverMsg serverModel -> case serverMsg of
-  UserServerMsg userServerMsg ->
-    let (userServerModel, cmd) = updateServer userServerMsg serverModel.userModel
-    in  (ServerModel userServerModel, Cmd.map UserServerMsg cmd)
+  ServerAppMsg serverAppMsg ->
+    let (serverAppModel, cmd) = updateServer serverAppMsg serverModel.appModel
+    in  (ServerModel serverAppModel, Cmd.map ServerAppMsg cmd)
 
 -- PROCEDURE
 
-type RemoteServerMsg remoteServerMsg = UserRemoteServerMsg remoteServerMsg
+type RemoteServerMsg remoteServerMsg = RemoteServerAppMsg remoteServerMsg
 
 wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg -> RPC (ServerModel serverModel) (Msg msg) (ServerMsg serverMsg))
 wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
-  UserRemoteServerMsg msg -> RPC.map UserMsg UserServerMsg (\userModel serverModel -> { serverModel | userModel = userModel}) (\serverModel -> serverModel.userModel) (serverRPCs msg)
+  RemoteServerAppMsg msg -> RPC.map AppMsg ServerAppMsg (\appModel serverModel -> { serverModel | appModel = appModel}) (\serverModel -> serverModel.appModel) (serverRPCs msg)
 
 -- SERVER-STATE
 
-type alias ServerState serverState = { userState: serverState }
+type alias ServerState serverState = { appState: serverState }
 
 wrapServerState : (serverModel -> serverState) -> (ServerModel serverModel -> ServerState serverState)
-wrapServerState serverState = \serverModel -> let userState = serverState serverModel.userModel in ServerState userState
+wrapServerState serverState = \serverModel -> let appState = serverState serverModel.appModel in ServerState appState
 
 -- SERVER-SUBSCRIPTIONS
 
 wrapServerSubscriptions : (serverModel -> Sub serverMsg) -> (ServerModel serverModel -> Sub (ServerMsg serverMsg))
-wrapServerSubscriptions serverSubscriptions = \serverModel -> Sub.map UserServerMsg (serverSubscriptions serverModel.userModel)
+wrapServerSubscriptions serverSubscriptions = \serverModel -> Sub.map ServerAppMsg (serverSubscriptions serverModel.appModel)
 
 -- MODEL
 
-type Model userModel userMsg userRemoteServerMsg =
-  Running userModel |
-  Paused userModel userModel (MultitierCmd userRemoteServerMsg userMsg)
+type Model appModel appMsg remoteServerAppMsg =
+  Running appModel (List appMsg) |
+  Paused appModel (List appMsg) appModel (List appMsg) (MultitierCmd remoteServerAppMsg appMsg)
 
 wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg)))
-wrapInit init = \serverState -> let (model, cmd) = init serverState.userState in (Running model, Multitier.map UserRemoteServerMsg UserMsg cmd)
+wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (Running model [], Multitier.map RemoteServerAppMsg AppMsg cmd)
 
-type Msg msg = UserMsg msg | Pause | Resume
+type Msg msg = AppMsg msg | Pause | Resume
 
 wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg msg -> Model model msg remoteServerMsg -> ( Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg) ))
 wrapUpdate update = \msg model -> case msg of
-  UserMsg userMsg -> case model of
-    Running userModel ->
-      let (newUserModel, cmd) = update userMsg userModel
-      in  (Running newUserModel, Multitier.map UserRemoteServerMsg UserMsg cmd)
-    Paused pausedModel userModel cmd ->
-      let (newUserModel, newCmd) = update userMsg userModel
-      in  (Paused pausedModel newUserModel (Multitier.batch [cmd, newCmd]), Multitier.none)
+  AppMsg appMsg -> case model of
+    Running appModel messages ->
+      let (newAppModel, cmd) = update appMsg appModel
+      in  (Running newAppModel (appMsg :: messages), Multitier.map RemoteServerAppMsg AppMsg cmd)
+    Paused pausedModel pausedMessages appModel messages cmd ->
+      let (newAppModel, newCmd) = update appMsg appModel
+      in  (Paused pausedModel pausedMessages newAppModel (appMsg :: messages) (Multitier.batch [cmd, newCmd]), Multitier.none)
   Pause -> case model of
-    Running userModel -> Paused userModel userModel Multitier.none !! []
+    Running appModel messages -> Paused appModel messages appModel [] Multitier.none !! []
     _ -> model !! []
   Resume -> case model of
-    Paused pausedModel userModel cmd -> Running userModel !! [Multitier.map UserRemoteServerMsg UserMsg cmd]
+    Paused pausedModel pausedMessages appModel messages cmd -> Running appModel (List.append messages pausedMessages) !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
     _ -> model !! []
 
 
@@ -105,24 +105,28 @@ wrapUpdate update = \msg model -> case msg of
 
 wrapSubscriptions : (model -> Sub msg) -> (Model model msg remoteServerMsg -> Sub (Msg msg))
 wrapSubscriptions subscriptions = \model -> case model of
-  Running userModel -> Sub.map UserMsg (subscriptions userModel)
-  Paused pausedModel _ _ -> Sub.map UserMsg (subscriptions pausedModel)
+  Running appModel _-> Sub.map AppMsg (subscriptions appModel)
+  Paused pausedModel _ _ _ _ -> Sub.map AppMsg (subscriptions pausedModel)
 
 -- VIEW
 
 wrapView : (model -> Html msg) -> (Model model msg remoteServerMsg -> Html (Msg msg))
 wrapView view = \model -> case model of
-  Running userModel ->
+  Running appModel messages ->
     Html.div [] [
       Html.div [] [
-        Html.map UserMsg (view userModel)],
+        Html.map AppMsg (view appModel)],
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
-        Html.button [onClick Pause] [Html.text "Pause"]]
+        Html.button [onClick Pause] [Html.text "Pause"],
+        Html.br [] [],
+        Html.p [] [Html.text (toString messages)]]
     ]
-  Paused pausedModel _ _ ->
+  Paused pausedModel pausedMessages _ _ _ ->
     Html.div [] [
       Html.div [disabled True, onClick Resume, style [("opacity", "0.25")]] [
-        Html.map UserMsg (view pausedModel)],
+        Html.map AppMsg (view pausedModel)],
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
-        Html.button [onClick Resume] [Html.text "Resume"]]
+        Html.button [onClick Resume] [Html.text "Resume"],
+        Html.br [] [],
+        Html.p [] [Html.text (toString pausedMessages)]]
     ]
