@@ -5,7 +5,7 @@ module Multitier.Debugger
     , Msg, ServerMsg )
 
 import Html exposing (Html)
-import Html.Attributes exposing (style)
+import Html.Attributes exposing (style, disabled)
 import Html.Events exposing (onClick)
 import Multitier exposing (Config, MultitierCmd, MultitierProgram, (!!))
 import Multitier.RPC as RPC exposing (RPC)
@@ -114,13 +114,15 @@ wrapView : (model -> Html msg) -> (Model model msg remoteServerMsg -> Html (Msg 
 wrapView view = \model -> case model of
   Running userModel ->
     Html.div [] [
-      Html.map UserMsg (view userModel),
+      Html.div [disabled False] [
+        Html.map UserMsg (view userModel)],
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
         Html.button [onClick Pause] [Html.text "Pause"]]
     ]
   Paused pausedModel _ _ ->
     Html.div [] [
-      Html.map UserMsg (view pausedModel),
+      Html.div [disabled True, onClick Resume] [
+        Html.map UserMsg (view pausedModel)],
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
         Html.button [onClick Resume] [Html.text "Resume"]]
     ]
