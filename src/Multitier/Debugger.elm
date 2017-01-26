@@ -130,8 +130,8 @@ wrapView view = \model -> case model of
         Html.br [] [],
         Html.p [] (Array.toList (Array.map (\(index, (msg, model)) -> Html.p [] [
                                                                         Html.a [onClick (GoBack index)] [Html.text (toString msg)],
-                                                                        Html.br [] []]) (Array.indexedMap (,) messages)))]
-    ]
+                                                                        Html.br [] []]) (Array.indexedMap (,) messages))),
+        Html.pre [] [Html.text (toString appModel)]]]
   Paused pausedModel pausedMessages _ _ _ ->
     Html.div [] [
       Html.div [disabled True, onClick Resume, style [("opacity", "0.25")]] [
@@ -141,4 +141,5 @@ wrapView view = \model -> case model of
         Html.br [] [],
         Html.p [] (Array.toList (Array.map (\(index, (msg, model)) -> Html.p [] [
                                                                         Html.a [onClick (GoBack index)] [Html.text (toString msg)],
-                                                                        Html.br [] []]) (Array.indexedMap (,) pausedMessages)))]]
+                                                                        Html.br [] []]) (Array.indexedMap (,) pausedMessages))),
+        Html.pre [] [Html.text (toString pausedModel)]]]
