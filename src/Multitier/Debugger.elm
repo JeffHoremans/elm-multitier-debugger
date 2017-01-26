@@ -7,6 +7,8 @@ module Multitier.Debugger
 import Html exposing (Html)
 import Html.Attributes exposing (style, disabled)
 import Html.Events exposing (onClick)
+import Array exposing (Array)
+
 import Multitier exposing (Config, MultitierCmd, MultitierProgram, (!!))
 import Multitier.RPC as RPC exposing (RPC)
 
@@ -76,30 +78,37 @@ wrapServerSubscriptions serverSubscriptions = \serverModel -> Sub.map ServerAppM
 -- MODEL
 
 type Model appModel appMsg remoteServerAppMsg =
-  Running appModel (List appMsg) |
-  Paused appModel (List appMsg) appModel (List appMsg) (MultitierCmd remoteServerAppMsg appMsg)
+  Running appModel (Array (appMsg, appModel)) |
+  Paused appModel (Array (appMsg, appModel)) appModel (Array (appMsg, appModel)) (MultitierCmd remoteServerAppMsg appMsg)
 
 wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg)))
-wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (Running model [], Multitier.map RemoteServerAppMsg AppMsg cmd)
+wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (Running model Array.empty, Multitier.map RemoteServerAppMsg AppMsg cmd)
 
-type Msg msg = AppMsg msg | Pause | Resume
+type Msg msg = AppMsg msg | Pause | Resume | GoBack Int
 
 wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg msg -> Model model msg remoteServerMsg -> ( Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg) ))
 wrapUpdate update = \msg model -> case msg of
   AppMsg appMsg -> case model of
     Running appModel messages ->
       let (newAppModel, cmd) = update appMsg appModel
-      in  (Running newAppModel (appMsg :: messages), Multitier.map RemoteServerAppMsg AppMsg cmd)
+      in  (Running newAppModel (Array.push (appMsg, newAppModel) messages), Multitier.map RemoteServerAppMsg AppMsg cmd)
     Paused pausedModel pausedMessages appModel messages cmd ->
       let (newAppModel, newCmd) = update appMsg appModel
-      in  (Paused pausedModel pausedMessages newAppModel (appMsg :: messages) (Multitier.batch [cmd, newCmd]), Multitier.none)
+      in  (Paused pausedModel pausedMessages newAppModel (Array.push (appMsg, newAppModel) messages) (Multitier.batch [cmd, newCmd]), Multitier.none)
   Pause -> case model of
-    Running appModel messages -> Paused appModel messages appModel [] Multitier.none !! []
+    Running appModel messages -> Paused appModel messages appModel Array.empty Multitier.none !! []
     _ -> model !! []
   Resume -> case model of
-    Paused pausedModel pausedMessages appModel messages cmd -> Running appModel (List.append messages pausedMessages) !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
+    Paused pausedModel pausedMessages appModel messages cmd -> Running appModel (Array.append messages pausedMessages) !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
     _ -> model !! []
+  GoBack index -> case model of
+    Running appModel messages -> Paused (getPreviousAppModel appModel index messages) messages appModel Array.empty Multitier.none !! []
+    Paused pausedModel pausedMessages appModel messages cmd -> Paused (getPreviousAppModel pausedModel index pausedMessages) pausedMessages appModel messages cmd !! []
 
+getPreviousAppModel : appModel -> Int -> Array (appMsg, appModel) -> appModel
+getPreviousAppModel appModel index messages = case Array.get index messages of
+  Just (_, model) -> model
+  _ -> appModel
 
 -- SUBSCRIPTIONS
 
@@ -119,7 +128,7 @@ wrapView view = \model -> case model of
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
         Html.button [onClick Pause] [Html.text "Pause"],
         Html.br [] [],
-        Html.p [] [Html.text (toString messages)]]
+        Html.p [] (Array.toList (Array.map (\(index, (msg, model)) -> Html.a [onClick (GoBack index)] [Html.text (toString msg)]) (Array.indexedMap (,) messages)))]
     ]
   Paused pausedModel pausedMessages _ _ _ ->
     Html.div [] [
@@ -128,5 +137,4 @@ wrapView view = \model -> case model of
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
         Html.button [onClick Resume] [Html.text "Resume"],
         Html.br [] [],
-        Html.p [] [Html.text (toString pausedMessages)]]
-    ]
+        Html.p [] (Array.toList (Array.map (\(index, (msg, model)) -> Html.a [onClick (GoBack index)] [Html.text (toString msg)]) (Array.indexedMap (,) pausedMessages)))]]
