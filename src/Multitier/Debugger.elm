@@ -114,14 +114,14 @@ wrapView : (model -> Html msg) -> (Model model msg remoteServerMsg -> Html (Msg 
 wrapView view = \model -> case model of
   Running userModel ->
     Html.div [] [
-      Html.div [disabled False] [
+      Html.div [] [
         Html.map UserMsg (view userModel)],
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
         Html.button [onClick Pause] [Html.text "Pause"]]
     ]
   Paused pausedModel _ _ ->
     Html.div [] [
-      Html.div [disabled True, onClick Resume] [
+      Html.div [disabled True, onClick Resume, style [("opacity", "0.25")]] [
         Html.map UserMsg (view pausedModel)],
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
         Html.button [onClick Resume] [Html.text "Resume"]]
