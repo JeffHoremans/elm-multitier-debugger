@@ -128,7 +128,9 @@ wrapView view = \model -> case model of
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
         Html.button [onClick Pause] [Html.text "Pause"],
         Html.br [] [],
-        Html.p [] (Array.toList (Array.map (\(index, (msg, model)) -> Html.a [onClick (GoBack index)] [Html.text (toString msg)]) (Array.indexedMap (,) messages)))]
+        Html.p [] (Array.toList (Array.map (\(index, (msg, model)) -> Html.p [] [
+                                                                        Html.a [onClick (GoBack index)] [Html.text (toString msg)],
+                                                                        Html.br [] []]) (Array.indexedMap (,) messages)))]
     ]
   Paused pausedModel pausedMessages _ _ _ ->
     Html.div [] [
