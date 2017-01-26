@@ -99,7 +99,7 @@ wrapUpdate update = \msg model -> case msg of
     Running appModel messages -> Paused appModel messages appModel Array.empty Multitier.none !! []
     _ -> model !! []
   Resume -> case model of
-    Paused pausedModel pausedMessages appModel messages cmd -> Running appModel (Array.append messages pausedMessages) !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
+    Paused pausedModel pausedMessages appModel messages cmd -> Running appModel (Array.append pausedMessages messages) !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
     _ -> model !! []
   GoBack index -> case model of
     Running appModel messages -> Paused (getPreviousAppModel appModel index messages) messages appModel Array.empty Multitier.none !! []
