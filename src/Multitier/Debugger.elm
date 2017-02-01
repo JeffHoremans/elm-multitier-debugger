@@ -79,14 +79,15 @@ wrapServerSubscriptions serverSubscriptions = \serverModel -> Sub.map ServerAppM
 
 type alias Model appModel appMsg remoteServerAppMsg =
   { appState : AppState appModel appMsg remoteServerAppMsg
-  , resumeFromPaused : Bool }
+  , resumeFromPaused : Bool
+  }
 
 type AppState appModel appMsg remoteServerAppMsg =
   Running appModel (Array (appMsg, appModel)) |
   Paused appModel (Array (appMsg, appModel)) appModel (Array (appMsg, appModel)) (MultitierCmd remoteServerAppMsg appMsg)
 
 wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg)))
-wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (Model (Running model Array.empty) True, Multitier.map RemoteServerAppMsg AppMsg cmd)
+wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (Model (Running model Array.empty) False, Multitier.map RemoteServerAppMsg AppMsg cmd)
 
 type Msg msg = AppMsg msg | Pause | Resume | GoBack Int | ToggleResumeFromPaused
 
@@ -136,7 +137,7 @@ wrapView appView = \model ->
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
         Html.button [onClick btnAction] [Html.text btnText],
         Html.br [] [],
-        Html.text "Add events recieved during pause when resuming",
+        Html.text "Resume from current paused model",
         Html.input [value (toString model.resumeFromPaused), type_ "checkbox", onInput (always ToggleResumeFromPaused)] [],
         Html.br [] [],
         messageView messages,
