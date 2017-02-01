@@ -111,7 +111,7 @@ wrapUpdate update = \msg model -> case msg of
   GoBack index -> case model.appState of
     Running appModel messages -> { model | appState = Paused (getPreviousAppModel appModel index messages) messages appModel Array.empty Multitier.none } !! []
     Paused pausedModel pausedMessages appModel messages cmd -> { model | appState = Paused (getPreviousAppModel pausedModel index pausedMessages) pausedMessages appModel messages cmd } !! []
-  ToggleResumeFromPaused -> { model | resumeFromPaused = not model.resumeFromPaused } !! []
+  ToggleResumeFromPaused -> let test = Debug.log "toggle" (toString model.resumeFromPaused) in { model | resumeFromPaused = not model.resumeFromPaused } !! []
 
 
 getPreviousAppModel : appModel -> Int -> Array (appMsg, appModel) -> appModel
