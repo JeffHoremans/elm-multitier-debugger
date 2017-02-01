@@ -124,7 +124,7 @@ getPreviousAppModel appModel index messages = case Array.get index messages of
 wrapSubscriptions : (model -> Sub msg) -> (Model model msg remoteServerMsg -> Sub (Msg msg))
 wrapSubscriptions subscriptions = \model -> case model.appState of
   Running appModel _-> Sub.map AppMsg (subscriptions appModel)
-  Paused pausedModel _ _ _ _ -> Sub.map AppMsg (subscriptions pausedModel)
+  Paused pausedModel _ _ _ _ -> Sub.none --Sub.map AppMsg (subscriptions pausedModel)
 
 -- VIEW
 
