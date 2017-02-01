@@ -125,8 +125,8 @@ wrapView appView = \model ->
     Html.div [] [
       Html.div [] [
         Html.map AppMsg (appView appModel)],
-      Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
-        Html.button [onClick Pause] [Html.text "Pause"],
+      Html.div divAtt [
+        Html.button [onClick btnAction] [Html.text btnText],
         Html.br [] [],
         messageView messages,
         Html.pre [] [Html.text (toString appModel)]]]
