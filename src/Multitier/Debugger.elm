@@ -79,7 +79,7 @@ wrapServerSubscriptions serverSubscriptions = \serverModel -> Sub.map ServerAppM
 
 type alias Model appModel appMsg remoteServerAppMsg =
   { appState : AppState appModel appMsg remoteServerAppMsg
-  , effectsOnResume : Bool }
+  , resumeFromPaused : Bool }
 
 type AppState appModel appMsg remoteServerAppMsg =
   Running appModel (Array (appMsg, appModel)) |
@@ -88,7 +88,7 @@ type AppState appModel appMsg remoteServerAppMsg =
 wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg)))
 wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (Model (Running model Array.empty) True, Multitier.map RemoteServerAppMsg AppMsg cmd)
 
-type Msg msg = AppMsg msg | Pause | Resume | GoBack Int | ToggleEffectsOnResume
+type Msg msg = AppMsg msg | Pause | Resume | GoBack Int | ToggleResumeFromPaused
 
 wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg msg -> Model model msg remoteServerMsg -> ( Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg) ))
 wrapUpdate update = \msg model -> case msg of
@@ -103,12 +103,14 @@ wrapUpdate update = \msg model -> case msg of
     Running appModel messages -> { model | appState = Paused appModel messages appModel Array.empty Multitier.none } !! []
     _ -> model !! []
   Resume -> case model.appState of
-    Paused pausedModel pausedMessages appModel messages cmd -> { model | appState = Running appModel (Array.append pausedMessages messages)} !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
+    Paused pausedModel pausedMessages appModel messages cmd -> case model.resumeFromPaused of
+      True -> { model | appState = Running pausedModel pausedMessages } !! []
+      False -> { model | appState = Running appModel (Array.append pausedMessages messages)} !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
     _ -> model !! []
   GoBack index -> case model.appState of
     Running appModel messages -> { model | appState = Paused (getPreviousAppModel appModel index messages) messages appModel Array.empty Multitier.none } !! []
     Paused pausedModel pausedMessages appModel messages cmd -> { model | appState = Paused (getPreviousAppModel pausedModel index pausedMessages) pausedMessages appModel messages cmd } !! []
-  ToggleEffectsOnResume -> { model | effectsOnResume = not model.effectsOnResume } !! []
+  ToggleResumeFromPaused -> { model | resumeFromPaused = not model.resumeFromPaused } !! []
 
 
 getPreviousAppModel : appModel -> Int -> Array (appMsg, appModel) -> appModel
@@ -133,7 +135,9 @@ wrapView appView = \model ->
         Html.map AppMsg (appView appModel)],
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
         Html.button [onClick btnAction] [Html.text btnText],
-        Html.input [value (toString model.effectsOnResume), type_ "checkbox", onInput (always ToggleEffectsOnResume)] [],
+        Html.br [] [],
+        Html.text "Add events recieved during pause when resuming",
+        Html.input [value (toString model.resumeFromPaused), type_ "checkbox", onInput (always ToggleResumeFromPaused)] [],
         Html.br [] [],
         messageView messages,
         Html.pre [] [Html.text (toString appModel)]]]
