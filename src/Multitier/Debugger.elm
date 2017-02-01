@@ -129,7 +129,8 @@ wrapView appView = \model ->
         Html.button [onClick btnAction] [Html.text btnText],
         Html.br [] [],
         messageView messages,
-        Html.pre [] [Html.text (toString appModel)]]]
+        Html.pre [] [Html.text (toString appModel)],
+        Html.pre [] [Html.text (toString messages)]]]
     in case model of
       Running appModel messages ->
         view appModel messages [] Pause "Pause"
