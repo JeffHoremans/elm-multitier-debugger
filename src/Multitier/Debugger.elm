@@ -5,7 +5,7 @@ module Multitier.Debugger
     , Msg, ServerMsg )
 
 import Html exposing (Html)
-import Html.Attributes exposing (style, disabled)
+import Html.Attributes exposing (style, disabled, size)
 import Html.Events exposing (onClick)
 import Array exposing (Array)
 
@@ -120,26 +120,26 @@ wrapSubscriptions subscriptions = \model -> case model of
 -- VIEW
 
 wrapView : (model -> Html msg) -> (Model model msg remoteServerMsg -> Html (Msg msg))
-wrapView view = \model -> case model of
-  Running appModel messages ->
+wrapView appView = \model ->
+  let view appModel messages divAtt btnAction btnText =
     Html.div [] [
       Html.div [] [
-        Html.map AppMsg (view appModel)],
+        Html.map AppMsg (appView appModel)],
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
         Html.button [onClick Pause] [Html.text "Pause"],
         Html.br [] [],
-        Html.p [] (Array.toList (Array.map (\(index, (msg, model)) -> Html.p [] [
-                                                                        Html.a [onClick (GoBack index)] [Html.text (toString msg)],
-                                                                        Html.br [] []]) (Array.indexedMap (,) messages))),
+        messageView messages,
         Html.pre [] [Html.text (toString appModel)]]]
-  Paused pausedModel pausedMessages _ _ _ ->
-    Html.div [] [
-      Html.div [disabled True, onClick Resume, style [("opacity", "0.25")]] [
-        Html.map AppMsg (view pausedModel)],
-      Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
-        Html.button [onClick Resume] [Html.text "Resume"],
-        Html.br [] [],
-        Html.p [] (Array.toList (Array.map (\(index, (msg, model)) -> Html.p [] [
-                                                                        Html.a [onClick (GoBack index)] [Html.text (toString msg)],
-                                                                        Html.br [] []]) (Array.indexedMap (,) pausedMessages))),
-        Html.pre [] [Html.text (toString pausedModel)]]]
+    in case model of
+      Running appModel messages ->
+        view appModel messages [] Pause "Pause"
+      Paused pausedModel pausedMessages _ _ _ ->
+        view pausedModel pausedMessages [disabled True, onClick Resume, style [("opacity", "0.25")]] Resume "Resume"
+
+messageView : Array (msg, model) -> Html (Msg msg)
+messageView messages =
+  let options = messages
+    |> Array.indexedMap (,)
+    |> Array.map (\(index, (msg, model)) -> Html.option [] [Html.a [onClick (GoBack index)] [Html.text (toString msg)]])
+    |> Array.toList
+  in Html.select [size 15] options
