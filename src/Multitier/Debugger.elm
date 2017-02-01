@@ -6,7 +6,7 @@ module Multitier.Debugger
 
 import Html exposing (Html)
 import Html.Attributes exposing (style, disabled, size, value, type_)
-import Html.Events exposing (onClick, onInput)
+import Html.Events exposing (onClick, onCheck)
 import Array exposing (Array)
 
 import Multitier exposing (Config, MultitierCmd, MultitierProgram, (!!))
@@ -89,7 +89,7 @@ type AppState appModel appMsg remoteServerAppMsg =
 wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg)))
 wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (Model (Running model Array.empty) False, Multitier.map RemoteServerAppMsg AppMsg cmd)
 
-type Msg msg = AppMsg msg | Pause | Resume | GoBack Int | ToggleResumeFromPaused
+type Msg msg = AppMsg msg | Pause | Resume | GoBack Int | ToggleResumeFromPaused Bool
 
 wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg msg -> Model model msg remoteServerMsg -> ( Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg) ))
 wrapUpdate update = \msg model -> case msg of
@@ -111,7 +111,7 @@ wrapUpdate update = \msg model -> case msg of
   GoBack index -> case model.appState of
     Running appModel messages -> { model | appState = Paused (getPreviousAppModel appModel index messages) messages appModel Array.empty Multitier.none } !! []
     Paused pausedModel pausedMessages appModel messages cmd -> { model | appState = Paused (getPreviousAppModel pausedModel index pausedMessages) pausedMessages appModel messages cmd } !! []
-  ToggleResumeFromPaused -> let test = Debug.log "toggle" (toString model.resumeFromPaused) in { model | resumeFromPaused = not model.resumeFromPaused } !! []
+  ToggleResumeFromPaused _ -> { model | resumeFromPaused = not model.resumeFromPaused } !! []
 
 
 getPreviousAppModel : appModel -> Int -> Array (appMsg, appModel) -> appModel
@@ -138,7 +138,7 @@ wrapView appView = \model ->
         Html.button [onClick btnAction] [Html.text btnText],
         Html.br [] [],
         Html.text "Resume from current paused model",
-        Html.input [value (toString model.resumeFromPaused), type_ "checkbox", onInput (always ToggleResumeFromPaused)] [],
+        Html.input [value (toString model.resumeFromPaused), type_ "checkbox", onCheck ToggleResumeFromPaused] [],
         Html.br [] [],
         messageView messages,
         Html.pre [] [Html.text (toString appModel)]]]
