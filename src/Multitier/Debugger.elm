@@ -141,7 +141,7 @@ messageView : Array (msg, model) -> Html (Msg msg)
 messageView messages =
   let options = messages
     |> Array.indexedMap (,)
-    |> Array.map (\(index, (msg, model)) -> Html.option [] [Html.a [onClick (GoBack index)] [Html.text (toString msg)]])
+    |> Array.map (\(index, (msg, model)) -> Html.option [onClick (GoBack index)] [Html.text (toString msg)])
     |> Array.toList
     -- |> List.reverse
   in Html.select [size 15] options
