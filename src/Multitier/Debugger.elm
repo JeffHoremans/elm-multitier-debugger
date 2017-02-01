@@ -123,9 +123,9 @@ wrapView : (model -> Html msg) -> (Model model msg remoteServerMsg -> Html (Msg 
 wrapView appView = \model ->
   let view appModel messages divAtt btnAction btnText =
     Html.div [] [
-      Html.div [] [
-        Html.map AppMsg (appView appModel)],
       Html.div divAtt [
+        Html.map AppMsg (appView appModel)],
+      Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
         Html.button [onClick btnAction] [Html.text btnText],
         Html.br [] [],
         messageView messages,
