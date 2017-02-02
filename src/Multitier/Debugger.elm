@@ -192,6 +192,7 @@ wrapView appView = \model ->
         Html.br [] [],
         Html.text "Resume from: ",
         Html.select [disabled hideResumeFrom, on "change" (Decode.map SetResume targetSelectedIndex)] (selectResume model.resume model.runInBackground),
+        Html.br [] [],
         messageView messages,
         Html.pre [] [Html.text (toString appModel)]]]
     in case model.appState of
