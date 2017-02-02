@@ -119,7 +119,8 @@ wrapUpdate update = \msg model -> case msg of
       False -> model !! []
 
   Pause -> case model.appState of
-    Running state -> { model | appState = Paused (PausedState state.appModel state.messages ((Array.length state.messages) - 1) (RunningState state.appModel Array.empty)) } !! []
+    Running state -> { model | resume = if model.runInBackground then model.resume else FromPaused
+                             , appState = Paused (PausedState state.appModel state.messages ((Array.length state.messages) - 1) (RunningState state.appModel Array.empty)) } !! []
     _ -> model !! []
   Resume -> case model.appState of
     Paused state -> case model.resume of
