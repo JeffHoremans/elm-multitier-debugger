@@ -5,7 +5,7 @@ module Multitier.Debugger
     , Msg, ServerMsg )
 
 import Html exposing (Html)
-import Html.Attributes exposing (style, disabled, size, value, type_, selected)
+import Html.Attributes exposing (checked, style, disabled, size, value, type_, selected)
 import Html.Events exposing (onClick, onCheck, on)
 import Array exposing (Array)
 import Json.Decode as Decode exposing (Decoder)
@@ -131,7 +131,7 @@ wrapUpdate update = \msg model -> case msg of
     Running state -> { model | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.messages) state.messages index (RunningState state.appModel Array.empty))  } !! []
     Paused state -> { model | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedMessages) state.pausedMessages index state.background) } !! []
 
-  ToggleRunInBackground _ -> { model | runInBackground = not model.runInBackground } !! []
+  ToggleRunInBackground runInBackground -> { model | runInBackground = runInBackground } !! []
   SetResume index -> case Array.get index resumeStrategies of
     Just resume -> { model | resume = resume } !! []
     _ -> model !! []
@@ -181,7 +181,7 @@ wrapView appView = \model ->
         Html.button [onClick btnAction] [Html.text btnText],
         Html.br [] [],
         Html.text "Run in background when paused",
-        Html.input [disabled hideRunInBackground, value (toString model.runInBackground), type_ "checkbox", onCheck ToggleRunInBackground] [],
+        Html.input [disabled hideRunInBackground, checked model.runInBackground, type_ "checkbox", onCheck ToggleRunInBackground] [],
         Html.br [] [],
         Html.text "Resume from: ",
         Html.select [disabled hideResumeFrom, on "change" (Decode.map SetResume targetSelectedIndex)] (selectResume model.resume model.runInBackground),
