@@ -162,7 +162,7 @@ targetSelectedIndex = Decode.at ["target", "selectedIndex"] Decode.int
 selectResume: ResumeStrategy -> Bool -> List (Html (Msg msg))
 selectResume currentResume runInBackground =
   resumeStrategies
-    |> Array.map (\resume -> Html.option [selected (currentResume == resume), disabled (if runInBackground then False else True)] [ Html.text (resumeToString resume)])
+    |> Array.map (\resume -> Html.option [selected (currentResume == resume), disabled (if resume == FromBackground && not runInBackground then True else False)] [ Html.text (resumeToString resume)])
     |> Array.toList
 
 resumeToString : ResumeStrategy -> String
