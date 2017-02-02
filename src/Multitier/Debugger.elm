@@ -100,7 +100,7 @@ type alias RunningState appModel appMsg =
 type alias PausedState appModel appMsg =
   { pausedModel : appModel
   , pausedMessages : Array (appMsg, appModel)
-  , previousIndex : Maybe Int
+  , previousIndex : Int
   , background : RunningState appModel appMsg }
 
 wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg)))
@@ -119,37 +119,30 @@ wrapUpdate update = \msg model -> case msg of
       False -> model !! []
 
   Pause -> case model.appState of
-    Running state -> { model | appState = Paused (PausedState state.appModel state.messages Nothing (RunningState state.appModel Array.empty)) } !! []
+    Running state -> { model | appState = Paused (PausedState state.appModel state.messages ((Array.length state.messages) - 1) (RunningState state.appModel Array.empty)) } !! []
     _ -> model !! []
   Resume -> case model.appState of
-    Paused state ->
-      -- case model.resumeFromPrevious of
-      -- True -> { model | appState = Running pausedModel pausedMessages } !! []
-      -- False -> { model | appState = Running pausedModel pausedMessages } !! []
-
-      { model | appState = Running (RunningState state.background.appModel (Array.append state.pausedMessages state.background.messages)) } !! []
-
-      -- case model.resumeFromPrevious of
-      --   True -> { model | appState = Running pausedModel pausedMessages }
-
-      -- let newAppModel = if model.resumeFromPaused then pausedModel else appModel
-      --     newMessages = if model.addEventsOnResume then Array.append pausedMessages messages else pausedMessages
-      --     newCommands = if model.addEventsOnResume then [Multitier.map RemoteServerAppMsg AppMsg cmd] else []
-      -- in { model | appState = Running newAppModel newMessages } !! newCommands
+    Paused state -> case model.resume of
+      FromPrevious -> { model | appState = Running (RunningState state.pausedModel (getPreviousMessages state.previousIndex state.pausedMessages)) } !! []
+      FromPaused -> { model | appState = Running (RunningState (getPreviousAppModel state.pausedModel ((Array.length state.pausedMessages) - 1) state.pausedMessages) state.pausedMessages) } !! []
+      FromBackground -> { model | appState = Running (RunningState state.background.appModel (Array.append state.pausedMessages state.background.messages)) } !! []
     _ -> model !! []
   GoBack index -> case model.appState of
-    Running state -> { model | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.messages) state.messages (Just index) (RunningState state.appModel Array.empty))  } !! []
-    Paused state -> { model | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedMessages) state.pausedMessages (Just index) state.background) } !! []
+    Running state -> { model | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.messages) state.messages index (RunningState state.appModel Array.empty))  } !! []
+    Paused state -> { model | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedMessages) state.pausedMessages index state.background) } !! []
+
   ToggleRunInBackground _ -> { model | runInBackground = not model.runInBackground } !! []
   SetResume index -> case Array.get index resumeStrategies of
     Just resume -> { model | resume = resume } !! []
     _ -> model !! []
 
-
 getPreviousAppModel : appModel -> Int -> Array (appMsg, appModel) -> appModel
 getPreviousAppModel appModel index messages = case Array.get index messages of
   Just (_, model) -> model
   _ -> appModel
+
+getPreviousMessages : Int -> Array (appMsg, appModel) -> Array (appMsg, appModel)
+getPreviousMessages index messages = messages |> Array.slice 0 (index+1)
 
 -- SUBSCRIPTIONS
 
@@ -180,7 +173,7 @@ resumeToString resume = case resume of
 
 wrapView : (model -> Html msg) -> (Model model msg remoteServerMsg -> Html (Msg msg))
 wrapView appView = \model ->
-  let view appModel messages divAtt btnAction btnText hideRunInBackground hideResumeFrom =
+  let view appModel messages previousIndex divAtt btnAction btnText hideRunInBackground hideResumeFrom =
     Html.div [] [
       Html.div divAtt [
         Html.map AppMsg (appView appModel)],
@@ -193,19 +186,19 @@ wrapView appView = \model ->
         Html.text "Resume from: ",
         Html.select [disabled hideResumeFrom, on "change" (Decode.map SetResume targetSelectedIndex)] (selectResume model.resume model.runInBackground),
         Html.br [] [],
-        messageView messages,
+        messageView messages previousIndex,
         Html.pre [] [Html.text (toString appModel)]]]
     in case model.appState of
       Running state ->
-        view state.appModel state.messages [] Pause "Pause" False True
+        view state.appModel state.messages ((Array.length state.messages) - 1) [] Pause "Pause" False True
       Paused state ->
-        view state.pausedModel state.pausedMessages [disabled True, onClick Resume, style [("opacity", "0.25")]] Resume "Resume" True False
+        view state.pausedModel state.pausedMessages state.previousIndex [disabled True, onClick Resume, style [("opacity", "0.25")]] Resume "Resume" True False
 
-messageView : Array (msg, model) -> Html (Msg msg)
-messageView messages =
+messageView : Array (msg, model) -> Int -> Html (Msg msg)
+messageView messages previousIndex =
   let options = messages
     |> Array.indexedMap (,)
-    |> Array.map (\(index, (msg, model)) -> Html.option [onClick (GoBack index)] [Html.text (toString msg)])
+    |> Array.map (\(index, (msg, model)) -> Html.option [onClick (GoBack index), selected (previousIndex == index)] [Html.text (toString msg)])
     |> Array.toList
     |> List.reverse
   in Html.select [size 15] options
