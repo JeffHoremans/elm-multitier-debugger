@@ -13,6 +13,25 @@ import Json.Decode as Decode exposing (Decoder)
 import Multitier exposing (Config, MultitierCmd, MultitierProgram, (!!))
 import Multitier.RPC as RPC exposing (RPC)
 
+type ResumeStrategy = FromPrevious | FromPaused | FromBackground
+
+resumeStrategies : Array ResumeStrategy
+resumeStrategies = Array.fromList [FromPrevious, FromPaused, FromBackground]
+
+type AppState appModel appMsg =
+  Running (RunningState appModel appMsg) |
+  Paused (PausedState appModel appMsg)
+
+type alias RunningState appModel appMsg =
+  { appModel : appModel
+  , messages : Array (appMsg, appModel) }
+
+type alias PausedState appModel appMsg =
+  { pausedModel : appModel
+  , pausedMessages : Array (appMsg, appModel)
+  , previousIndex : Int
+  , background : RunningState appModel appMsg }
+
 -- PROGRAM
 
 program :
@@ -27,7 +46,7 @@ program :
   , updateServer : serverMsg -> serverModel -> (serverModel, Cmd serverMsg)
   , serverSubscriptions : serverModel -> Sub serverMsg
   }
-  -> MultitierProgram (Model model msg remoteServerMsg) (ServerModel serverModel) (Msg msg) (ServerMsg serverMsg)
+  -> MultitierProgram (Model model msg) (ServerModel serverModel serverMsg) (Msg msg) (ServerMsg serverMsg)
 program stuff = Multitier.program
     { config = stuff.config
     , init = wrapInit stuff.init
@@ -43,72 +62,76 @@ program stuff = Multitier.program
 
 -- SERVER-MODEL
 
-type alias ServerModel serverModel = { appModel: serverModel }
+type alias ServerModel serverModel serverMsg = { appState: AppState serverModel serverMsg }
 
-wrapInitServer : ((serverModel, Cmd serverMsg)) -> (((ServerModel serverModel), Cmd (ServerMsg serverMsg)))
-wrapInitServer (serverModel, cmd) = (ServerModel serverModel, Cmd.map ServerAppMsg cmd)
+wrapInitServer : ((serverModel, Cmd serverMsg)) -> (((ServerModel serverModel serverMsg), Cmd (ServerMsg serverMsg)))
+wrapInitServer (serverModel, cmd) = (ServerModel (Running (RunningState serverModel Array.empty)), Cmd.map ServerAppMsg cmd)
 
-type ServerMsg serverMsg = ServerAppMsg serverMsg
+type ServerMsg serverMsg = ServerAppMsg serverMsg | PauseServer | ResumeServer | GoBackServer Int
 
-wrapUpdateServer : (serverMsg -> serverModel -> (serverModel, Cmd serverMsg)) -> (ServerMsg serverMsg -> ServerModel serverModel -> (ServerModel serverModel, Cmd (ServerMsg serverMsg)))
+wrapUpdateServer : (serverMsg -> serverModel -> (serverModel, Cmd serverMsg)) -> (ServerMsg serverMsg -> ServerModel serverModel serverMsg -> (ServerModel serverModel serverMsg, Cmd (ServerMsg serverMsg)))
 wrapUpdateServer updateServer = \serverMsg serverModel -> case serverMsg of
-  ServerAppMsg serverAppMsg ->
-    let (serverAppModel, cmd) = updateServer serverAppMsg serverModel.appModel
-    in  (ServerModel serverAppModel, Cmd.map ServerAppMsg cmd)
+  ServerAppMsg serverAppMsg -> case serverModel.appState of
+    Running state -> let (newAppModel, cmd) = updateServer serverAppMsg state.appModel
+      in { serverModel | appState = Running (RunningState newAppModel (Array.push (serverAppMsg, newAppModel) state.messages)) } ! [Cmd.map ServerAppMsg cmd]
+    Paused state -> let (newAppModel, cmd) = updateServer serverAppMsg state.background.appModel
+      in { serverModel | appState = Paused { state | background = RunningState newAppModel (Array.push (serverAppMsg, newAppModel) state.background.messages) }} ! [Cmd.map ServerAppMsg cmd]
+
+  PauseServer -> case serverModel.appState of
+    Running state -> { serverModel | appState = Paused (PausedState state.appModel state.messages ((Array.length state.messages) - 1) (RunningState state.appModel Array.empty)) } ! []
+    _ -> serverModel ! []
+  ResumeServer -> case serverModel.appState of
+    Paused state -> { serverModel | appState = Running (RunningState state.background.appModel (Array.append state.pausedMessages state.background.messages)) } ! []
+    _ -> serverModel ! []
+  GoBackServer index -> case serverModel.appState of
+    Running state -> { serverModel | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.messages) state.messages index (RunningState state.appModel Array.empty))  } ! []
+    Paused state -> { serverModel | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedMessages) state.pausedMessages index state.background) } ! []
 
 -- PROCEDURE
 
 type RemoteServerMsg remoteServerMsg = RemoteServerAppMsg remoteServerMsg
-
-wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg -> RPC (ServerModel serverModel) (Msg msg) (ServerMsg serverMsg))
+wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg -> RPC (ServerModel serverModel serverMsg) (Msg msg) (ServerMsg serverMsg))
 wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
-  RemoteServerAppMsg msg -> RPC.map AppMsg ServerAppMsg (\appModel serverModel -> { serverModel | appModel = appModel}) (\serverModel -> serverModel.appModel) (serverRPCs msg)
+  RemoteServerAppMsg msg ->
+    RPC.map AppMsg ServerAppMsg
+      (\appModel serverModel -> case serverModel.appState of
+        Running state -> { serverModel | appState = Running { state | appModel = appModel }}
+        Paused state -> let background = state.background in { serverModel | appState = Paused { state | background = { background | appModel = appModel }}})
+      (\serverModel -> case serverModel.appState of
+        Running state -> state.appModel
+        Paused state -> state.background.appModel)
+      (serverRPCs msg)
 
 -- SERVER-STATE
 
 type alias ServerState serverState = { appState: serverState }
 
-wrapServerState : (serverModel -> serverState) -> (ServerModel serverModel -> ServerState serverState)
-wrapServerState serverState = \serverModel -> let appState = serverState serverModel.appModel in ServerState appState
+wrapServerState : (serverModel -> serverState) -> (ServerModel serverModel serverMsg -> ServerState serverState)
+wrapServerState serverState = \serverModel -> let appState = case serverModel.appState of
+  Running state -> serverState state.appModel
+  Paused state -> serverState state.background.appModel in ServerState appState
 
 -- SERVER-SUBSCRIPTIONS
 
-wrapServerSubscriptions : (serverModel -> Sub serverMsg) -> (ServerModel serverModel -> Sub (ServerMsg serverMsg))
-wrapServerSubscriptions serverSubscriptions = \serverModel -> Sub.map ServerAppMsg (serverSubscriptions serverModel.appModel)
+wrapServerSubscriptions : (serverModel -> Sub serverMsg) -> (ServerModel serverModel serverMsg -> Sub (ServerMsg serverMsg))
+wrapServerSubscriptions serverSubscriptions = \serverModel -> case serverModel.appState of
+  Running state -> Sub.map ServerAppMsg (serverSubscriptions state.appModel)
+  Paused state -> Sub.map ServerAppMsg (serverSubscriptions state.background.appModel)
+
 
 -- MODEL
 
-
-type alias Model appModel appMsg remoteServerAppMsg =
-  { appState : AppState appModel appMsg remoteServerAppMsg
+type alias Model appModel appMsg  =
+  { appState : AppState appModel appMsg
   , runInBackground : Bool
   , resume : ResumeStrategy }
 
-type ResumeStrategy = FromPrevious | FromPaused | FromBackground
-
-resumeStrategies : Array ResumeStrategy
-resumeStrategies = Array.fromList [FromPrevious, FromPaused, FromBackground]
-
-type AppState appModel appMsg remoteServerAppMsg =
-  Running (RunningState appModel appMsg) |
-  Paused (PausedState appModel appMsg)
-
-type alias RunningState appModel appMsg =
-  { appModel : appModel
-  , messages : Array (appMsg, appModel) }
-
-type alias PausedState appModel appMsg =
-  { pausedModel : appModel
-  , pausedMessages : Array (appMsg, appModel)
-  , previousIndex : Int
-  , background : RunningState appModel appMsg }
-
-wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg)))
+wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg)))
 wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (Model (Running (RunningState model Array.empty)) True FromBackground, Multitier.map RemoteServerAppMsg AppMsg cmd)
 
 type Msg msg = AppMsg msg | Pause | Resume | GoBack Int | ToggleRunInBackground Bool | SetResume Int
 
-wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg msg -> Model model msg remoteServerMsg -> ( Model model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg) ))
+wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg msg -> Model model msg -> ( Model model msg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg) ))
 wrapUpdate update = \msg model -> case msg of
   AppMsg appMsg -> case model.appState of
     Running state -> let (newAppModel, cmd) = update appMsg state.appModel
@@ -147,7 +170,7 @@ getPreviousMessages index messages = messages |> Array.slice 0 (index+1)
 
 -- SUBSCRIPTIONS
 
-wrapSubscriptions : (model -> Sub msg) -> (Model model msg remoteServerMsg -> Sub (Msg msg))
+wrapSubscriptions : (model -> Sub msg) -> (Model model msg -> Sub (Msg msg))
 wrapSubscriptions subscriptions = \model -> case model.appState of
   Running state -> Sub.map AppMsg (subscriptions state.appModel)
   Paused state -> case model.runInBackground of
@@ -172,34 +195,51 @@ resumeToString resume = case resume of
   FromPaused -> "paused state"
   FromBackground -> "current state running in background"
 
-wrapView : (model -> Html msg) -> (Model model msg remoteServerMsg -> Html (Msg msg))
+wrapView : (model -> Html msg) -> (Model model msg -> Html (Msg msg))
 wrapView appView = \model ->
   let view appModel messages previousIndex divAtt btnAction btnText hideRunInBackground hideResumeFrom =
     Html.div [] [
       Html.div divAtt [
         Html.map AppMsg (appView appModel)],
       Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
-        Html.button [onClick btnAction] [Html.text btnText],
+        actions model (ActionsProperties btnAction btnText hideRunInBackground hideResumeFrom),
         Html.br [] [],
-        Html.text "Run in background when paused",
-        Html.input [disabled hideRunInBackground, checked model.runInBackground, type_ "checkbox", onCheck ToggleRunInBackground] [],
-        Html.br [] [],
-        Html.text "Resume from: ",
-        Html.select [disabled hideResumeFrom, on "change" (Decode.map SetResume targetSelectedIndex)] (selectResume model.resume model.runInBackground),
-        Html.br [] [],
-        messageView messages previousIndex,
-        Html.pre [] [Html.text (toString appModel)]]]
+        messageView appModel messages previousIndex]]
     in case model.appState of
       Running state ->
         view state.appModel state.messages ((Array.length state.messages) - 1) [] Pause "Pause" False True
       Paused state ->
         view state.pausedModel state.pausedMessages state.previousIndex [disabled True, onClick Resume, style [("opacity", "0.25")]] Resume "Resume" True False
 
-messageView : Array (msg, model) -> Int -> Html (Msg msg)
-messageView messages previousIndex =
+messageView : model -> Array (msg, model) -> Int -> Html (Msg msg)
+messageView appModel messages previousIndex =
   let options = messages
     |> Array.indexedMap (,)
     |> Array.map (\(index, (msg, model)) -> Html.option [onClick (GoBack index), selected (previousIndex == index)] [Html.text (toString msg)])
     |> Array.toList
     |> List.reverse
-  in Html.select [size 15] options
+  in Html.div [] [
+    Html.select [size 15] options,
+    Html.pre [] [Html.text (toString appModel)]]
+
+type alias ActionsProperties msg =
+  { btnAction: msg
+  , btnText: String
+  , hideRunInBackground: Bool
+  , hideResumeFrom: Bool }
+
+actions : Model model msg -> ActionsProperties (Msg msg) -> Html (Msg msg)
+actions model props = Html.div [] [
+  Html.button [onClick props.btnAction] [Html.text props.btnText],
+  Html.br [] [],
+  Html.text "Run in background when paused",
+  Html.input [disabled props.hideRunInBackground, checked model.runInBackground, type_ "checkbox", onCheck ToggleRunInBackground] [],
+  Html.br [] [],
+  Html.text "Resume from: ",
+  Html.select [disabled props.hideResumeFrom, on "change" (Decode.map SetResume targetSelectedIndex)] (selectResume model.resume model.runInBackground)]
+
+-- SERVER-VIEW
+-- rendered on client
+
+serverView : ServerModel serverModel serverMsg -> Html (Msg msg)
+serverView serverModel = Html.div [] []
