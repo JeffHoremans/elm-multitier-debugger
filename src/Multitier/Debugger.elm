@@ -9,9 +9,14 @@ import Html.Attributes exposing (checked, style, disabled, size, value, type_, s
 import Html.Events exposing (onClick, onCheck, on)
 import Array exposing (Array)
 import Json.Decode as Decode exposing (Decoder)
+import Task exposing (Task)
+import Dict exposing (Dict)
 
-import Multitier exposing (Config, MultitierCmd, MultitierProgram, (!!))
-import Multitier.RPC as RPC exposing (RPC)
+import Multitier exposing (Config, MultitierCmd, MultitierProgram, (!!), performOnServer)
+import Multitier.RPC as RPC exposing (RPC, rpc)
+import Multitier.Error exposing (Error)
+import Multitier.Server.WebSocket as ServerWebSocket exposing (SocketServer)
+import Multitier.Server.Console as Console
 
 type ResumeStrategy = FromPrevious | FromPaused | FromBackground
 
@@ -46,7 +51,7 @@ program :
   , updateServer : serverMsg -> serverModel -> (serverModel, Cmd serverMsg)
   , serverSubscriptions : serverModel -> Sub serverMsg
   }
-  -> MultitierProgram (Model model msg serverModel serverMsg) (ServerModel serverModel serverMsg) (Msg msg) (ServerMsg serverMsg)
+  -> MultitierProgram (Model model msg serverModel serverMsg) (ServerModel serverModel serverMsg model msg) (Msg msg) (ServerMsg serverMsg)
 program stuff = Multitier.program
     { config = stuff.config
     , init = wrapInit stuff.init
@@ -62,14 +67,20 @@ program stuff = Multitier.program
 
 -- SERVER-MODEL
 
-type alias ServerModel serverModel serverMsg = { appState: AppState serverModel serverMsg }
+type alias ServerModel serverModel serverMsg model msg =
+  { appState: AppState serverModel serverMsg
+  , socketServer: Maybe SocketServer
+  , clientStates : Dict Int (AppState model msg)}
 
-wrapInitServer : ((serverModel, Cmd serverMsg)) -> (((ServerModel serverModel serverMsg), Cmd (ServerMsg serverMsg)))
-wrapInitServer (serverModel, cmd) = (ServerModel (Running (RunningState serverModel Array.empty)), Cmd.map ServerAppMsg cmd)
+wrapInitServer : ((serverModel, Cmd serverMsg)) -> (((ServerModel serverModel serverMsg model msg), Cmd (ServerMsg serverMsg)))
+wrapInitServer (serverModel, cmd) = (ServerModel (Running (RunningState serverModel Array.empty)) Maybe.Nothing Dict.empty, Cmd.map ServerAppMsg cmd)
 
-type ServerMsg serverMsg = ServerAppMsg serverMsg | PauseServer | ResumeServer | GoBackServer Int
+type ServerMsg serverMsg = ServerAppMsg serverMsg |
+                           PauseServer | ResumeServer | GoBackServer Int |
+                           OnSocketOpen SocketServer |
+                           Nothing
 
-wrapUpdateServer : (serverMsg -> serverModel -> (serverModel, Cmd serverMsg)) -> (ServerMsg serverMsg -> ServerModel serverModel serverMsg -> (ServerModel serverModel serverMsg, Cmd (ServerMsg serverMsg)))
+wrapUpdateServer : (serverMsg -> serverModel -> (serverModel, Cmd serverMsg)) -> (ServerMsg serverMsg -> ServerModel serverModel serverMsg model msg -> (ServerModel serverModel serverMsg model msg, Cmd (ServerMsg serverMsg)))
 wrapUpdateServer updateServer = \serverMsg serverModel -> case serverMsg of
   ServerAppMsg serverAppMsg -> case serverModel.appState of
     Running state -> let (newAppModel, cmd) = updateServer serverAppMsg state.appModel
@@ -87,11 +98,18 @@ wrapUpdateServer updateServer = \serverMsg serverModel -> case serverMsg of
     Running state -> { serverModel | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.messages) state.messages index (RunningState state.appModel Array.empty))  } ! []
     Paused state -> { serverModel | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedMessages) state.pausedMessages index state.background) } ! []
 
+  OnSocketOpen socketServer -> { serverModel | socketServer = Just socketServer } ! [Console.log "Socket open debugger !!!!!!!!"]
+  Nothing -> serverModel ! []
+
 -- PROCEDURE
 
-type RemoteServerMsg remoteServerMsg = RemoteServerAppMsg remoteServerMsg
-wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg -> RPC (ServerModel serverModel serverMsg) (Msg msg) (ServerMsg serverMsg))
+type RemoteServerMsg remoteServerMsg model msg = RemoteServerAppMsg remoteServerMsg | SetState Int (AppState model msg)
+
+wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg model msg -> RPC (ServerModel serverModel serverMsg model msg) (Msg msg) (ServerMsg serverMsg))
 wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
+
+  SetState cid state -> rpc HandleSend (\serverModel -> (serverModel, Task.succeed (), Cmd.none))
+
   RemoteServerAppMsg msg ->
     RPC.map AppMsg ServerAppMsg
       (\appModel serverModel -> case serverModel.appState of
@@ -106,34 +124,39 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
 
 type alias ServerState serverState = { appState: serverState }
 
-wrapServerState : (serverModel -> serverState) -> (ServerModel serverModel serverMsg -> ServerState serverState)
+wrapServerState : (serverModel -> serverState) -> (ServerModel serverModel serverMsg model msg -> ServerState serverState)
 wrapServerState serverState = \serverModel -> let appState = case serverModel.appState of
   Running state -> serverState state.appModel
   Paused state -> serverState state.background.appModel in ServerState appState
 
 -- SERVER-SUBSCRIPTIONS
 
-wrapServerSubscriptions : (serverModel -> Sub serverMsg) -> (ServerModel serverModel serverMsg -> Sub (ServerMsg serverMsg))
-wrapServerSubscriptions serverSubscriptions = \serverModel -> case serverModel.appState of
-  Running state -> Sub.map ServerAppMsg (serverSubscriptions state.appModel)
-  Paused state -> Sub.map ServerAppMsg (serverSubscriptions state.background.appModel)
-
+wrapServerSubscriptions : (serverModel -> Sub serverMsg) -> (ServerModel serverModel serverMsg model msg -> Sub (ServerMsg serverMsg))
+wrapServerSubscriptions serverSubscriptions =
+  \serverModel ->
+    let appSubs = case serverModel.appState of
+      Running state -> Sub.map ServerAppMsg (serverSubscriptions state.appModel)
+      Paused state -> Sub.map ServerAppMsg (serverSubscriptions state.background.appModel)
+    in Sub.batch [appSubs, ServerWebSocket.listen OnSocketOpen (always Nothing) (always Nothing) (always Nothing)]
 
 -- MODEL
 
-type Model model msg serverModel serverMsg = ClientDebugger (ClientModel model msg) | ServerDebugger (ServerModel serverModel serverMsg)
+type Model model msg serverModel serverMsg = ClientDebugger (ClientModel model msg) | ServerDebugger (ServerModel serverModel serverMsg model msg)
 
 type alias ClientModel appModel appMsg  =
   { appState : AppState appModel appMsg
   , runInBackground : Bool
   , resume : ResumeStrategy }
 
-wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg serverModel serverMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg)))
+wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg serverModel serverMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg msg)))
 wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (ClientDebugger (ClientModel (Running (RunningState model Array.empty)) True FromBackground), Multitier.map RemoteServerAppMsg AppMsg cmd)
 
-type Msg msg = AppMsg msg | Pause | Resume | GoBack Int | ToggleRunInBackground Bool | SetResume Int
+type Msg msg = AppMsg msg |
+               Pause | Resume | GoBack Int |
+               ToggleRunInBackground Bool | SetResume Int |
+               HandleSend (Result Error ())
 
-wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg msg -> Model model msg serverModel serverMsg -> ( Model model msg serverModel serverMsg, MultitierCmd (RemoteServerMsg remoteServerMsg) (Msg msg) ))
+wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg msg -> Model model msg serverModel serverMsg -> ( Model model msg serverModel serverMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg msg) ))
 wrapUpdate update = \msg model -> case model of
   ClientDebugger cmodel -> case msg of
     AppMsg appMsg -> case cmodel.appState of
@@ -161,6 +184,10 @@ wrapUpdate update = \msg model -> case model of
     ToggleRunInBackground runInBackground -> ClientDebugger { cmodel | runInBackground = runInBackground } !! []
     SetResume index -> case Array.get index resumeStrategies of
       Just resume -> ClientDebugger { cmodel | resume = resume } !! []
+      _ -> model !! []
+
+    HandleSend result -> case result of
+      Result.Err err -> model !! [] -- TODO what to do in this case?
       _ -> model !! []
   _ -> model !! []
 
