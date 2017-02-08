@@ -1,6 +1,3 @@
 [submodule "elm-multitier"]
 	path = elm-multitier
 	url = https://github.com/JeffHoremans/elm-multitier.git
-[submodule "elm-multitier-internal"]
-	path = elm-multitier-internal
-	url = https://github.com/JeffHoremans/elm-multitier-internal.git
