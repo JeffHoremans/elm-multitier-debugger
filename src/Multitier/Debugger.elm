@@ -9,13 +9,14 @@ import Html.Attributes exposing (checked, style, disabled, size, value, type_, s
 import Html.Events exposing (onClick, onCheck, on)
 import Array exposing (Array)
 import Json.Decode as Decode exposing (Decoder)
-import Task exposing (Task)
+-- import Task exposing (Task)
 import Dict exposing (Dict)
+import WebSocket
 
 import Multitier exposing (Config, MultitierCmd, MultitierProgram, (!!), performOnServer)
 import Multitier.RPC as RPC exposing (RPC, rpc)
 import Multitier.Error exposing (Error)
-import Multitier.Server.WebSocket as ServerWebSocket exposing (SocketServer)
+import Multitier.Server.WebSocket as ServerWebSocket exposing (WebSocket, ClientId)
 -- import Multitier.Server.Console as Console
 
 type ResumeStrategy = FromPrevious | FromPaused | FromBackground
@@ -68,20 +69,20 @@ program stuff = Multitier.program
 -- SERVER-MODEL
 
 type alias ServerModel serverModel serverMsg model msg =
-  { socketServer: Maybe SocketServer
-  , debuggerCid: Maybe Int
+  { socket: Maybe WebSocket
+  , debuggerCid: Maybe ClientId
   , debugger: ServerDebuggerModel serverModel serverMsg model msg }
 
 type alias ServerDebuggerModel serverModel serverMsg model msg =
   { appState: AppState serverModel serverMsg
-  , clientStates : Dict Int (AppState model msg)}
+  , clientStates : Dict ClientId (AppState model msg)}
 
 wrapInitServer : ((serverModel, Cmd serverMsg)) -> (((ServerModel serverModel serverMsg model msg), Cmd (ServerMsg serverMsg)))
 wrapInitServer (serverModel, cmd) = (ServerModel Maybe.Nothing Maybe.Nothing (ServerDebuggerModel (Running (RunningState serverModel Array.empty)) Dict.empty), Cmd.map ServerAppMsg cmd)
 
 type ServerMsg serverMsg = ServerAppMsg serverMsg |
                            PauseServer | ResumeServer | GoBackServer Int |
-                           OnSocketOpen SocketServer |
+                           OnSocketOpen WebSocket |
                            Nothing
 
 wrapUpdateServer : (serverMsg -> serverModel -> (serverModel, Cmd serverMsg)) -> (ServerMsg serverMsg -> ServerModel serverModel serverMsg model msg -> (ServerModel serverModel serverMsg model msg, Cmd (ServerMsg serverMsg)))
@@ -102,21 +103,21 @@ wrapUpdateServer updateServer = \serverMsg serverModel -> let debugger = serverM
     Running state -> { serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.messages) state.messages index (RunningState state.appModel Array.empty))  }} ! []
     Paused state -> { serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedMessages) state.pausedMessages index state.background) }} ! []
 
-  OnSocketOpen socketServer -> { serverModel | socketServer = Just socketServer } ! []
+  OnSocketOpen socket -> { serverModel | socket = Just socket } ! []
   Nothing -> serverModel ! []
 
 -- PROCEDURE
 
 type RemoteServerMsg remoteServerMsg model msg =
-  RemoteServerAppMsg remoteServerMsg |
-  StartServerDebugView Int |
-  SetState Int (AppState model msg)
+  RemoteServerAppMsg remoteServerMsg --|
+  -- StartServerDebugView ClientId |
+  -- SetState Int (AppState model msg)
 
 wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg model msg -> RPC (ServerModel serverModel serverMsg model msg) (Msg model msg serverModel serverMsg) (ServerMsg serverMsg))
 wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
 
-  StartServerDebugView cid -> rpc HandleStartServerDebugView (\serverModel -> ({ serverModel | debuggerCid = Just cid }, Task.succeed serverModel.debugger, Cmd.none))
-  SetState cid state -> rpc HandleSetState (\serverModel -> (serverModel, Task.succeed (), Cmd.none))
+  -- StartServerDebugView cid -> rpc HandleStartServerDebugView (\serverModel -> ({ serverModel | debuggerCid = Just cid }, Task.succeed serverModel.debugger, Cmd.none))
+  -- SetState cid state -> rpc HandleSetState (\serverModel -> (serverModel, Task.succeed (), Cmd.none))
 
   RemoteServerAppMsg msg ->
     RPC.map AppMsg ServerAppMsg
@@ -145,7 +146,7 @@ wrapServerSubscriptions serverSubscriptions =
     let appSubs = case serverModel.debugger.appState of
       Running state -> Sub.map ServerAppMsg (serverSubscriptions state.appModel)
       Paused state -> Sub.map ServerAppMsg (serverSubscriptions state.background.appModel)
-    in Sub.batch [appSubs, ServerWebSocket.listen OnSocketOpen (always Nothing) (always Nothing) (always Nothing)]
+    in Sub.batch [appSubs, ServerWebSocket.listen "debugger" OnSocketOpen (always Nothing) (always Nothing) (always Nothing)]
 
 -- MODEL
 
@@ -167,6 +168,7 @@ type Msg model msg serverModel serverMsg =
 
   SwitchDebugger |
 
+  SetServerModel String |
   HandleSetState (Result Error ()) |
   HandleStartServerDebugView (Result Error (ServerDebuggerModel serverModel serverMsg model msg))
 
@@ -205,6 +207,8 @@ wrapUpdate update = \msg model -> case model of
     HandleSetState result -> case result of
       Result.Err err -> model !! [] -- TODO error in view
       _ -> model !! []
+
+    SetServerModel data -> model !! []
     _ -> model !! []
 
   _ -> model !! []
@@ -227,7 +231,7 @@ wrapSubscriptions subscriptions = \model -> case model of
       Paused state -> case cmodel.runInBackground of
         True -> Sub.map AppMsg (subscriptions state.pausedModel)
         False -> Sub.none
-  ServerDebugger smodel -> Sub.none
+  ServerDebugger smodel -> WebSocket.listen "ws://localhost:8081/debugger" SetServerModel
 
 -- VIEW
 
