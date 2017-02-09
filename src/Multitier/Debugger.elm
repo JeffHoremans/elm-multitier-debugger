@@ -218,7 +218,7 @@ wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (M
 wrapUpdate update = \msg model -> case model of
   ClientDebugger cid cmodel -> case msg of
     OnServerSocketMsg data -> case (fromJSONString data) of
-      SetClientId clientId -> ClientDebugger (Just clientId) cmodel !! []
+      SetClientId clientId -> let test = (Debug.log "clientid" (toString clientId)) in ClientDebugger (Just clientId) cmodel !! []
       _ -> model !! []
 
     AppMsg appMsg -> case cmodel.appState of
