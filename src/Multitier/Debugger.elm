@@ -120,22 +120,28 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
   -- SetState cid state -> rpc HandleSetState (\serverModel -> (serverModel, Task.succeed (), Cmd.none))
   PauseDebugger -> rpc Handle
     (\serverModel -> case serverModel.debugger.appState of
-      Running state -> let debugger = serverModel.debugger in
-        ({ serverModel | debugger = { debugger | appState = Paused (PausedState state.appModel state.messages ((Array.length state.messages) - 1) (RunningState state.appModel Array.empty)) }}
-        , Task.succeed (), sendDebuggerModel serverModel)
+      Running state ->
+        let debugger = serverModel.debugger in
+          let newServerModel = { serverModel | debugger = { debugger | appState = Paused (PausedState state.appModel state.messages ((Array.length state.messages) - 1) (RunningState state.appModel Array.empty)) }} in
+            (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
   ResumeDebugger -> rpc Handle
     (\serverModel -> case serverModel.debugger.appState of
-      Paused state -> let debugger = serverModel.debugger in
-        ({ serverModel | debugger = { debugger | appState = Running (RunningState state.background.appModel (Array.append state.pausedMessages state.background.messages)) }}
-        , Task.succeed (), sendDebuggerModel serverModel)
+      Paused state ->
+        let debugger = serverModel.debugger in
+          let newServerModel = { serverModel | debugger = { debugger | appState = Running (RunningState state.background.appModel (Array.append state.pausedMessages state.background.messages)) }} in
+            (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
   GoBackDebugger index -> rpc Handle
     (\serverModel -> let debugger = serverModel.debugger in case serverModel.debugger.appState of
-      Running state -> ({ serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.messages) state.messages index (RunningState state.appModel Array.empty))  }}, Task.succeed (), sendDebuggerModel serverModel)
-      Paused state -> ({ serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedMessages) state.pausedMessages index state.background) }}, Task.succeed (), sendDebuggerModel serverModel))
+      Running state ->
+        let newServerModel = { serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.messages) state.messages index (RunningState state.appModel Array.empty))  }} in
+          (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
+      Paused state ->
+        let newServerModel = { serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedMessages) state.pausedMessages index state.background) }} in
+          (newServerModel, Task.succeed (), sendDebuggerModel newServerModel))
 
 
   RemoteServerAppMsg msg ->
