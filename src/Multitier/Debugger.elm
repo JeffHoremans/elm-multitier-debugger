@@ -229,14 +229,15 @@ wrapUpdate update = \msg model -> case model of
   ServerDebugger sm -> case sm of
     Just smodel -> case msg of
 
-      SetServerModel data -> ServerDebugger (Just (fromJSONString data)) !! []
-
       Pause -> model !! [performOnServer PauseDebugger]
       Resume -> model !! [performOnServer ResumeDebugger]
       GoBack index -> model !! [performOnServer (GoBackDebugger index)]
       -- SwitchDebugger -> TODO
+
       _ -> model !! []
-    _ -> model !! []
+    _ -> case msg of
+      SetServerModel data -> ServerDebugger (Just (fromJSONString data)) !! []
+      _ -> model !! []
 
 getPreviousAppModel : appModel -> Int -> Array (appMsg, appModel) -> appModel
 getPreviousAppModel appModel index messages = case Array.get index messages of
