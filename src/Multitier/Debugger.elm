@@ -20,7 +20,7 @@ import Multitier.Error exposing (Error)
 import Multitier.Server.WebSocket as ServerWebSocket exposing (WebSocket, ClientId)
 -- import Multitier.Server.Console as Console
 import Multitier.LowLevel exposing (toJSON, fromJSONString)
-import Multitier.Server.Console as Console
+-- import Multitier.Server.Console as Console
 
 type ResumeStrategy = FromPrevious | FromPaused | FromBackground
 
@@ -188,7 +188,7 @@ wrapServerState serverState = \serverModel ->
       Paused state ->
         { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel --(Array.push (serverAppMsg, newAppModel) state.background.events)
                                                                                                                   state.background.events }}} ! [Cmd.map ServerAppMsg newCmd]
-    in (ServerState appState, newWrappedServerModel, Cmd.batch [newWrappedCmd, Console.log "Client initialized from current server state"])
+    in (ServerState appState, newWrappedServerModel, Cmd.batch [newWrappedCmd])
 
 -- SERVER-SUBSCRIPTIONS
 
