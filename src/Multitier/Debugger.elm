@@ -352,7 +352,7 @@ wrapView appView = \model -> case model of
       let view appModel events previousIndex divAtt actionProps =
         Html.div [] [
           Html.button [onClick SwitchDebugger] [Html.text "Switch to client"],
-          -- actions smodel actionProps,
+          serverActions smodel actionProps,
           serverEventsView appModel events previousIndex]
         in case smodel.appState of
           Running state ->
@@ -409,3 +409,7 @@ actions model props = Html.div [] [
   Html.br [] [],
   Html.text "Resume from: ",
   Html.select [disabled props.hideResumeFrom, on "change" (Decode.map SetResume targetSelectedIndex)] (selectResume model.resume model.runInBackground)]
+
+serverActions : ServerDebuggerModel serverModel serverMsg model msg -> ActionProps (Msg model msg serverModel serverMsg) -> Html (Msg model msg serverModel serverMsg)
+serverActions model props = Html.div [] [
+  Html.button [onClick props.btnAction] [Html.text props.btnText]]
