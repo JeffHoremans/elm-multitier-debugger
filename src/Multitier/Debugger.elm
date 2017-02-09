@@ -146,13 +146,20 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
 
   RemoteServerAppMsg msg ->
     RPC.map AppMsg ServerAppMsg
-      (\appModel serverModel -> let debugger = serverModel.debugger in case serverModel.debugger.appState of
-        Running state -> { serverModel | debugger = { debugger | appState = Running { state | appModel = appModel }}} ! [sendDebuggerModel serverModel]
-        Paused state -> let background = state.background in { serverModel | debugger = { debugger | appState = Paused { state | background = { background | appModel = appModel }}}} ! [sendDebuggerModel serverModel])
-      (\serverModel -> case serverModel.debugger.appState of
-        Running state -> state.appModel
-        Paused state -> state.background.appModel)
-      (serverRPCs msg)
+      (\appModel serverModel ->
+        let debugger = serverModel.debugger in
+          case serverModel.debugger.appState of
+            Running state ->
+              let newServerModel = { serverModel | debugger = { debugger | appState = Running { state | appModel = appModel }}} in
+                newServerModel ! [sendDebuggerModel newServerModel]
+            Paused state ->
+              let background = state.background in
+                let newServerModel = { serverModel | debugger = { debugger | appState = Paused { state | background = { background | appModel = appModel }}}} in
+                  newServerModel ! [sendDebuggerModel newServerModel])
+          (\serverModel -> case serverModel.debugger.appState of
+            Running state -> state.appModel
+            Paused state -> state.background.appModel)
+          (serverRPCs msg)
 
 -- SERVER-STATE
 
