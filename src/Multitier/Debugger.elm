@@ -55,7 +55,7 @@ program :
   , updateServer : serverMsg -> serverModel -> (serverModel, Cmd serverMsg)
   , serverSubscriptions : serverModel -> Sub serverMsg
   }
-  -> MultitierProgram (Model model msg serverModel serverMsg remoteServerMsg) (ServerModel serverModel serverMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg) (ServerMsg serverMsg)
+  -> MultitierProgram (Model model msg serverModel serverMsg remoteServerMsg) (ServerModel serverModel serverMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) (ServerMsg serverMsg)
 program stuff = Multitier.program
     { config = stuff.config
     , init = wrapInit stuff.init
@@ -73,7 +73,7 @@ program stuff = Multitier.program
 
 type alias ServerModel serverModel serverMsg remoteServerMsg model msg =
   { socket: Maybe WebSocket
-  , client: Maybe ClientId
+  , clients: Dict String ClientId
   , debugger: ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg }
 
 type alias ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg =
@@ -83,7 +83,7 @@ type alias ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg =
 type ServerEvent serverMsg remoteServerMsg = InitServer | ServerMsgEvent serverMsg | StateEvent | RPCevent remoteServerMsg
 
 wrapInitServer : ((serverModel, Cmd serverMsg)) -> (((ServerModel serverModel serverMsg remoteServerMsg model msg), Cmd (ServerMsg serverMsg)))
-wrapInitServer (serverModel, cmd) = (ServerModel Maybe.Nothing Maybe.Nothing (ServerDebuggerModel (Running (RunningState serverModel (Array.fromList [(InitServer,serverModel)]))) Dict.empty), Cmd.map ServerAppMsg cmd)
+wrapInitServer (serverModel, cmd) = (ServerModel Maybe.Nothing Dict.empty (ServerDebuggerModel (Running (RunningState serverModel (Array.fromList [(InitServer,serverModel)]))) Dict.empty), Cmd.map ServerAppMsg cmd)
 
 type ServerMsg serverMsg = ServerAppMsg serverMsg |
                            OnSocketOpen WebSocket | OnClientConnect ClientId | OnClientDisconnect ClientId |
@@ -109,8 +109,12 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
     in newServerModel ! [newCmds, sendDebuggerModel newServerModel]
 
 sendDebuggerModel : ServerModel serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
-sendDebuggerModel serverModel = case (serverModel.socket, serverModel.client) of
-  (Just socket, Just cid) -> ServerWebSocket.send socket cid (Encode.encode 0 (toJSON (SetServerModel serverModel.debugger)))
+sendDebuggerModel serverModel = case serverModel.socket of
+  Just socket ->
+    serverModel.clients
+      |> Dict.toList
+      |> List.map (\(_,cid) -> ServerWebSocket.send socket cid (Encode.encode 0 (toJSON (SetServerModel serverModel.debugger))))
+      |> Cmd.batch
   _ -> Cmd.none
 
 -- PROCEDURE
@@ -122,13 +126,13 @@ type RemoteServerMsg remoteServerMsg model msg =
   PauseDebugger | ResumeDebugger | GoBackDebugger Int
   -- SetState Int (AppState model msg)
 
-wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg model msg -> RPC (ServerModel serverModel serverMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg) (ServerMsg serverMsg))
+wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg model msg -> RPC (ServerModel serverModel serverMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) (ServerMsg serverMsg))
 wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
 
   -- SetState cid state -> rpc HandleSetState (\serverModel -> (serverModel, Task.succeed (), Cmd.none))
 
-  StartDebugView cid -> rpc Handle (\serverModel -> ({serverModel | client = Just cid }, Task.succeed (), Cmd.none))
-  StopDebugView cid -> rpc Handle (\serverModel -> ({ serverModel | client = Maybe.Nothing }, Task.succeed (), Cmd.none))
+  StartDebugView cid -> rpc HandleStartDebugView (\serverModel -> ({serverModel | clients = Dict.insert (toString cid) cid serverModel.clients }, Task.succeed (serverModel.debugger), Cmd.none))
+  StopDebugView cid -> rpc Handle (\serverModel -> ({ serverModel | clients = Dict.remove (toString cid) serverModel.clients }, Task.succeed (), Cmd.none))
 
   PauseDebugger -> rpc Handle
     (\serverModel -> case serverModel.debugger.appState of
@@ -211,10 +215,10 @@ type alias ClientModel appModel appMsg  =
 
 type ClientEvent appMsg = Init | MsgEvent appMsg
 
-wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg serverModel serverMsg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg)))
+wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg serverModel serverMsg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg)))
 wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (ClientDebugger Maybe.Nothing (ClientModel (Running (RunningState model (Array.fromList [(Init,model)]))) True FromBackground), Multitier.map RemoteServerAppMsg AppMsg cmd)
 
-type Msg model msg serverModel serverMsg =
+type Msg model msg serverModel serverMsg remoteServerMsg =
   AppMsg msg |
 
   OnServerSocketMsg String |
@@ -224,11 +228,12 @@ type Msg model msg serverModel serverMsg =
 
   SwitchDebugger |
 
-  Handle (Result Error ())
+  Handle (Result Error ()) |
+  HandleStartDebugView (Result Error (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg))
 
 type ServerSocketMsg serverModel serverMsg remoteServerMsg model msg = SetClientId ClientId | SetServerModel (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg)
 
-wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg model msg serverModel serverMsg -> Model model msg serverModel serverMsg remoteServerMsg -> ( Model model msg serverModel serverMsg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg) ))
+wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg model msg serverModel serverMsg remoteServerMsg -> Model model msg serverModel serverMsg remoteServerMsg -> ( Model model msg serverModel serverMsg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) ))
 wrapUpdate update = \msg model -> case model of
   ClientDebugger cid cmodel -> case msg of
     OnServerSocketMsg data -> case (fromJSONString data) of
@@ -270,12 +275,15 @@ wrapUpdate update = \msg model -> case model of
       Result.Err err -> model !! [] -- TODO error in view
       _ -> model !! []
 
+    HandleStartDebugView result -> model !! []
+
 
   ServerDebugger cid sm -> case sm of
     Just smodel -> case msg of
       OnServerSocketMsg data -> case (fromJSONString data) of
         SetServerModel serverModel -> ServerDebugger cid (Just serverModel) !! []
         _ -> model !! []
+
       Pause -> model !! [performOnServer PauseDebugger]
       Resume -> model !! [performOnServer ResumeDebugger]
       GoBack index -> model !! [performOnServer (GoBackDebugger index)]
@@ -283,9 +291,9 @@ wrapUpdate update = \msg model -> case model of
 
       _ -> model !! []
     _ -> case msg of
-      OnServerSocketMsg data -> case (fromJSONString data) of
-        SetServerModel serverModel -> ServerDebugger cid (Just serverModel) !! []
-        _ -> model !! []
+      HandleStartDebugView result -> case result of
+        Result.Err err -> model !! [] -- TODO handle error in view
+        Ok serverDebuggerModel ->  ServerDebugger cid (Just serverDebuggerModel) !! []
       _ -> model !! []
 
 getPreviousAppModel : appModel -> Int -> Array (appMsg, appModel) -> appModel
@@ -298,7 +306,7 @@ getPreviousEvents index events = events |> Array.slice 0 (index+1)
 
 -- SUBSCRIPTIONS
 
-wrapSubscriptions : (model -> Sub msg) -> (Model model msg serverModel serverMsg remoteServerMsg -> Sub (Msg model msg serverModel serverMsg))
+wrapSubscriptions : (model -> Sub msg) -> (Model model msg serverModel serverMsg remoteServerMsg -> Sub (Msg model msg serverModel serverMsg remoteServerMsg))
 wrapSubscriptions subscriptions = \model ->
   let subs = case model of
     ClientDebugger _ cmodel ->
@@ -316,7 +324,7 @@ wrapSubscriptions subscriptions = \model ->
 targetSelectedIndex : Decoder Int
 targetSelectedIndex = Decode.at ["target", "selectedIndex"] Decode.int
 
-selectResume: ResumeStrategy -> Bool -> List (Html (Msg model msg serverModel serverMsg))
+selectResume: ResumeStrategy -> Bool -> List (Html (Msg model msg serverModel serverMsg remoteServerMsg))
 selectResume currentResume runInBackground =
   resumeStrategies
     |> Array.map (\resume -> Html.option [selected (currentResume == resume), disabled (if resume == FromBackground && not runInBackground then True else False)] [ Html.text (resumeToString resume)])
@@ -328,7 +336,7 @@ resumeToString resume = case resume of
   FromPaused -> "paused state"
   FromBackground -> "current state running in background"
 
-wrapView : (model -> Html msg) -> (Model model msg serverModel serverMsg remoteServerMsg -> Html (Msg model msg serverModel serverMsg))
+wrapView : (model -> Html msg) -> (Model model msg serverModel serverMsg remoteServerMsg -> Html (Msg model msg serverModel serverMsg remoteServerMsg))
 wrapView appView = \model -> case model of
   ClientDebugger _ cmodel ->
     let view appModel events previousIndex divAtt actionProps =
@@ -359,7 +367,7 @@ wrapView appView = \model -> case model of
             view state.pausedModel state.pausedEvents state.previousIndex [disabled True, onClick Resume, style [("opacity", "0.25")]] (ActionProps Resume "Resume" True False)
     _ -> Html.text "loading..."
 
-serverEventsView : serverModel -> Array ((ServerEvent serverMsg remoteServerMsg), serverModel) -> Int -> Html (Msg model msg serverModel serverMsg)
+serverEventsView : serverModel -> Array ((ServerEvent serverMsg remoteServerMsg), serverModel) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 serverEventsView appModel events previousIndex =
   let options = events
     |> Array.indexedMap (,)
@@ -370,7 +378,7 @@ serverEventsView appModel events previousIndex =
     Html.select [size 15] options,
     Html.pre [] [Html.text (toString appModel)]]
 
-eventsView : model -> Array ((ClientEvent msg), model) -> Int -> Html (Msg model msg serverModel serverMsg)
+eventsView : model -> Array ((ClientEvent msg), model) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 eventsView appModel events previousIndex =
   let options = events
     |> Array.indexedMap (,)
@@ -389,18 +397,18 @@ type alias ActionProps msg =
 
 clientEventView : ClientEvent msg -> String
 clientEventView event = case event of
-  Init -> "[INIT]"
-  MsgEvent msg -> "[MSG] " ++ (toString msg)
+  Init -> "[Init]"
+  MsgEvent msg -> "[Msg] " ++ (toString msg)
 
 serverEventView : ServerEvent serverMsg remoteServerMsg -> String
 serverEventView event = case event of
-  InitServer -> "[INIT]"
-  ServerMsgEvent msg -> "[MSG] " ++ (toString msg)
-  StateEvent -> "[SERVER-STATE]"
+  InitServer -> "[Init]"
+  ServerMsgEvent msg -> "[Msg] " ++ (toString msg)
+  StateEvent -> "[Server-state requested]"
   RPCevent msg -> "[RPC] " ++ (toString msg)
 
 
-actions : ClientModel model msg -> ActionProps (Msg model msg serverModel serverMsg) -> Html (Msg model msg serverModel serverMsg)
+actions : ClientModel model msg -> ActionProps (Msg model msg serverModel serverMsg remoteServerMsg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 actions model props = Html.div [] [
   Html.button [onClick props.btnAction] [Html.text props.btnText],
   Html.br [] [],
@@ -410,6 +418,6 @@ actions model props = Html.div [] [
   Html.text "Resume from: ",
   Html.select [disabled props.hideResumeFrom, on "change" (Decode.map SetResume targetSelectedIndex)] (selectResume model.resume model.runInBackground)]
 
-serverActions : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> ActionProps (Msg model msg serverModel serverMsg) -> Html (Msg model msg serverModel serverMsg)
+serverActions : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> ActionProps (Msg model msg serverModel serverMsg remoteServerMsg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 serverActions model props = Html.div [] [
   Html.button [onClick props.btnAction] [Html.text props.btnText]]
