@@ -98,10 +98,10 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
           in { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push (serverAppMsg, newAppModel) state.background.messages) }}} ! [Cmd.map ServerAppMsg cmd]
 
       OnSocketOpen socket -> { serverModel | socket = Just socket } ! []
-      RequestDebugger (cid, _) -> { serverModel | client = Just cid } ! [Console.log "requesting..."]
+      RequestDebugger (cid, _) -> { serverModel | client = Just cid } ! []
       Nothing -> serverModel ! []
     in case (newServerModel.socket,newServerModel.client) of
-      (Just socket, Just cid) -> newServerModel ! [newCmds, sendDebuggerModel socket cid newServerModel]
+      (Just socket, Just cid) -> newServerModel ! [newCmds, sendDebuggerModel socket cid newServerModel, Console.log "sending..."]
       _ -> newServerModel ! [newCmds]
 
 sendDebuggerModel : WebSocket -> ClientId -> ServerModel serverModel serverMsg model msg -> Cmd (ServerMsg serverMsg)
