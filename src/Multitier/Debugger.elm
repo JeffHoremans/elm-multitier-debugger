@@ -80,7 +80,7 @@ type alias ServerDebuggerModel serverModel serverMsg model msg =
   { appState: AppState serverModel (ServerEvent serverMsg)
   , clientStates : Dict ClientId (AppState model msg) }
 
-type ServerEvent serverMsg = InitServer | ServerMsgEvent serverMsg
+type ServerEvent serverMsg = InitServer | ServerMsgEvent serverMsg | StateEvent
 
 wrapInitServer : ((serverModel, Cmd serverMsg)) -> (((ServerModel serverModel serverMsg model msg), Cmd (ServerMsg serverMsg)))
 wrapInitServer (serverModel, cmd) = (ServerModel Maybe.Nothing Maybe.Nothing (ServerDebuggerModel (Running (RunningState serverModel (Array.fromList [(InitServer,serverModel)]))) Dict.empty), Cmd.map ServerAppMsg cmd)
@@ -185,11 +185,9 @@ wrapServerState serverState = \serverModel ->
   let debugger = serverModel.debugger in
     let (newWrappedServerModel, newWrappedCmd) = case serverModel.debugger.appState of
       Running state ->
-        { serverModel | debugger = { debugger | appState = Running (RunningState newAppModel --(Array.push (serverAppMsg, newAppModel) state.events) TODO add serverstate debug event
-                                                                                              state.events) }} ! [Cmd.map ServerAppMsg newCmd]
+        { serverModel | debugger = { debugger | appState = Running (RunningState newAppModel  (Array.push (StateEvent, newAppModel) state.events)) }} ! [Cmd.map ServerAppMsg newCmd]
       Paused state ->
-        { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel --(Array.push (serverAppMsg, newAppModel) state.background.events)
-                                                                                                                  state.background.events }}} ! [Cmd.map ServerAppMsg newCmd]
+        { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push (StateEvent, newAppModel) state.background.events) }}} ! [Cmd.map ServerAppMsg newCmd]
     in (ServerState appState, newWrappedServerModel, Cmd.batch [newWrappedCmd])
 
 -- SERVER-SUBSCRIPTIONS
@@ -398,6 +396,7 @@ serverEventView : ServerEvent msg -> String
 serverEventView event = case event of
   InitServer -> "[INIT]"
   ServerMsgEvent msg -> "[MSG] " ++ (toString msg)
+  StateEvent -> "[SERVER-STATE]"
 
 
 actions : ClientModel model msg -> ActionProps (Msg model msg serverModel serverMsg) -> Html (Msg model msg serverModel serverMsg)
