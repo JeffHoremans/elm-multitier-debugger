@@ -18,6 +18,7 @@ import Multitier exposing (Config, MultitierCmd, MultitierProgram, (!!), perform
 import Multitier.RPC as RPC exposing (RPC, rpc)
 import Multitier.Error exposing (Error)
 import Multitier.Server.WebSocket as ServerWebSocket exposing (WebSocket, ClientId)
+import Multitier.Server.Console as Console
 import Multitier.LowLevel exposing (toJSON, fromJSONString)
 
 type ResumeStrategy = FromPrevious | FromPaused | FromBackground
@@ -97,7 +98,7 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
           in { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push (serverAppMsg, newAppModel) state.background.messages) }}} ! [Cmd.map ServerAppMsg cmd]
 
       OnSocketOpen socket -> { serverModel | socket = Just socket } ! []
-      RequestDebugger (cid, _) -> { serverModel | client = Just cid } ! []
+      RequestDebugger (cid, _) -> { serverModel | client = Just cid } ! [Console.log "requesting..."]
       Nothing -> serverModel ! []
     in case (newServerModel.socket,newServerModel.client) of
       (Just socket, Just cid) -> newServerModel ! [newCmds, sendDebuggerModel socket cid newServerModel]
@@ -246,14 +247,16 @@ getPreviousMessages index messages = messages |> Array.slice 0 (index+1)
 -- SUBSCRIPTIONS
 
 wrapSubscriptions : (model -> Sub msg) -> (Model model msg serverModel serverMsg -> Sub (Msg model msg serverModel serverMsg))
-wrapSubscriptions subscriptions = \model -> case model of
-  ClientDebugger cmodel ->
-    case cmodel.appState of
-      Running state -> Sub.map AppMsg (subscriptions state.appModel)
-      Paused state -> case cmodel.runInBackground of
-        True -> Sub.map AppMsg (subscriptions state.pausedModel)
-        False -> Sub.none
-  ServerDebugger smodel -> WebSocket.listen "ws://localhost:8081/debugger" SetServerModel
+wrapSubscriptions subscriptions = \model ->
+  let subs = case model of
+    ClientDebugger cmodel ->
+      case cmodel.appState of
+        Running state -> Sub.map AppMsg (subscriptions state.appModel)
+        Paused state -> case cmodel.runInBackground of
+          True -> Sub.map AppMsg (subscriptions state.pausedModel)
+          False -> Sub.none
+    ServerDebugger smodel -> Sub.none
+  in Sub.batch [subs, WebSocket.listen "ws://localhost:8081/debugger" SetServerModel]
 
 -- VIEW
 
