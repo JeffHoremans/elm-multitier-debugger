@@ -77,11 +77,13 @@ type alias ServerModel serverModel serverMsg model msg =
   , debugger: ServerDebuggerModel serverModel serverMsg model msg }
 
 type alias ServerDebuggerModel serverModel serverMsg model msg =
-  { appState: AppState serverModel serverMsg
+  { appState: AppState serverModel (ServerEvent serverMsg)
   , clientStates : Dict ClientId (AppState model msg) }
 
+type ServerEvent serverMsg = InitServer | ServerMsgEvent serverMsg
+
 wrapInitServer : ((serverModel, Cmd serverMsg)) -> (((ServerModel serverModel serverMsg model msg), Cmd (ServerMsg serverMsg)))
-wrapInitServer (serverModel, cmd) = (ServerModel Maybe.Nothing Maybe.Nothing (ServerDebuggerModel (Running (RunningState serverModel Array.empty)) Dict.empty), Cmd.map ServerAppMsg cmd)
+wrapInitServer (serverModel, cmd) = (ServerModel Maybe.Nothing Maybe.Nothing (ServerDebuggerModel (Running (RunningState serverModel (Array.fromList [(InitServer,serverModel)]))) Dict.empty), Cmd.map ServerAppMsg cmd)
 
 type ServerMsg serverMsg = ServerAppMsg serverMsg |
                            OnSocketOpen WebSocket | OnClientConnect ClientId | OnClientDisconnect ClientId |
@@ -93,9 +95,9 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
     let (newServerModel, newCmds) = case serverMsg of
       ServerAppMsg serverAppMsg -> case serverModel.debugger.appState of
         Running state -> let (newAppModel, cmd) = updateServer serverAppMsg state.appModel
-          in  { serverModel | debugger = { debugger | appState = Running (RunningState newAppModel (Array.push (serverAppMsg, newAppModel) state.events)) }} ! [Cmd.map ServerAppMsg cmd]
+          in  { serverModel | debugger = { debugger | appState = Running (RunningState newAppModel (Array.push ((ServerMsgEvent serverAppMsg), newAppModel) state.events)) }} ! [Cmd.map ServerAppMsg cmd]
         Paused state -> let (newAppModel, cmd) = updateServer serverAppMsg state.background.appModel
-          in { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push (serverAppMsg, newAppModel) state.background.events) }}} ! [Cmd.map ServerAppMsg cmd]
+          in { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push ((ServerMsgEvent serverAppMsg), newAppModel) state.background.events) }}} ! [Cmd.map ServerAppMsg cmd]
 
       OnSocketOpen socket -> { serverModel | socket = Just socket } ! []
       OnClientConnect cid -> case serverModel.socket of
@@ -359,11 +361,11 @@ wrapView appView = \model -> case model of
             view state.pausedModel state.pausedEvents state.previousIndex [disabled True, onClick Resume, style [("opacity", "0.25")]] (ActionProps Resume "Resume" True False)
     _ -> Html.text "loading..."
 
-serverEventsView : serverModel -> Array (serverMsg, serverModel) -> Int -> Html (Msg model msg serverModel serverMsg)
+serverEventsView : serverModel -> Array ((ServerEvent serverMsg), serverModel) -> Int -> Html (Msg model msg serverModel serverMsg)
 serverEventsView appModel events previousIndex =
   let options = events
     |> Array.indexedMap (,)
-    |> Array.map (\(index, (msg, model)) -> Html.option [onClick (GoBack index), selected (previousIndex == index)] [Html.text (toString msg)])
+    |> Array.map (\(index, (msg, model)) -> Html.option [onClick (GoBack index), selected (previousIndex == index)] [Html.text (serverEventView msg)])
     |> Array.toList
     |> List.reverse
   in Html.div [] [
@@ -391,6 +393,11 @@ clientEventView : ClientEvent msg -> String
 clientEventView event = case event of
   Init -> "[INIT]"
   MsgEvent msg -> "[MSG] " ++ (toString msg)
+
+serverEventView : ServerEvent msg -> String
+serverEventView event = case event of
+  InitServer -> "[INIT]"
+  ServerMsgEvent msg -> "[MSG] " ++ (toString msg)
 
 
 actions : ClientModel model msg -> ActionProps (Msg model msg serverModel serverMsg) -> Html (Msg model msg serverModel serverMsg)
