@@ -20,6 +20,7 @@ import Multitier.Error exposing (Error)
 import Multitier.Server.WebSocket as ServerWebSocket exposing (WebSocket, ClientId)
 -- import Multitier.Server.Console as Console
 import Multitier.LowLevel exposing (toJSON, fromJSONString)
+import Multitier.Server.Console as Console
 
 type ResumeStrategy = FromPrevious | FromPaused | FromBackground
 
@@ -48,7 +49,7 @@ program :
   , update : msg -> model -> ( model, MultitierCmd remoteServerMsg msg )
   , subscriptions : model -> Sub msg
   , view : model -> Html msg
-  , serverState : serverModel -> serverState
+  , serverState : serverModel -> (serverState, serverModel, Cmd serverMsg)
   , serverRPCs : remoteServerMsg -> RPC serverModel msg serverMsg
   , initServer: (serverModel, Cmd serverMsg)
   , updateServer : serverMsg -> serverModel -> (serverModel, Cmd serverMsg)
@@ -175,10 +176,20 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
 
 type alias ServerState serverState = { appState: serverState }
 
-wrapServerState : (serverModel -> serverState) -> (ServerModel serverModel serverMsg model msg -> ServerState serverState)
-wrapServerState serverState = \serverModel -> let appState = case serverModel.debugger.appState of
-  Running state -> serverState state.appModel
-  Paused state -> serverState state.background.appModel in ServerState appState
+wrapServerState : (serverModel -> (serverState, serverModel, Cmd serverMsg)) -> (ServerModel serverModel serverMsg model msg -> (ServerState serverState, ServerModel serverModel serverMsg model msg, Cmd (ServerMsg serverMsg)))
+wrapServerState serverState = \serverModel ->
+  let (appState, newAppModel, newCmd) = case serverModel.debugger.appState of
+    Running state -> serverState state.appModel
+    Paused state -> serverState state.background.appModel in
+  let debugger = serverModel.debugger in
+    let (newWrappedServerModel, newWrappedCmd) = case serverModel.debugger.appState of
+      Running state ->
+        { serverModel | debugger = { debugger | appState = Running (RunningState newAppModel --(Array.push (serverAppMsg, newAppModel) state.messages) TODO add serverstate debug message
+                                                                                              state.messages) }} ! [Cmd.map ServerAppMsg newCmd]
+      Paused state ->
+        { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel --(Array.push (serverAppMsg, newAppModel) state.background.messages)
+                                                                                                                  state.background.messages }}} ! [Cmd.map ServerAppMsg newCmd]
+    in (ServerState appState, newWrappedServerModel, Cmd.batch [newWrappedCmd, Console.log "Client initialized from current server state"])
 
 -- SERVER-SUBSCRIPTIONS
 
@@ -220,7 +231,7 @@ wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (M
 wrapUpdate update = \msg model -> case model of
   ClientDebugger cid cmodel -> case msg of
     OnServerSocketMsg data -> case (fromJSONString data) of
-      SetClientId clientId -> let test = (Debug.log "clientid" (toString clientId)) in ClientDebugger (Just clientId) cmodel !! []
+      SetClientId clientId -> ClientDebugger (Just clientId) cmodel !! []
       _ -> model !! []
 
     AppMsg appMsg -> case cmodel.appState of
