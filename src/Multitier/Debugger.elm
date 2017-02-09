@@ -100,12 +100,12 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
       OnSocketOpen socket -> { serverModel | socket = Just socket } ! []
       RequestDebugger (cid, _) -> { serverModel | client = Just cid } ! []
       Nothing -> serverModel ! []
-    in case (newServerModel.socket,newServerModel.client) of
-      (Just socket, Just cid) -> newServerModel ! [newCmds, sendDebuggerModel socket cid newServerModel]
-      _ -> newServerModel ! [newCmds]
+    in newServerModel ! [newCmds, sendDebuggerModel newServerModel]
 
-sendDebuggerModel : WebSocket -> ClientId -> ServerModel serverModel serverMsg model msg -> Cmd (ServerMsg serverMsg)
-sendDebuggerModel socket cid serverModel = ServerWebSocket.send socket cid (Encode.encode 0 (toJSON serverModel.debugger))
+sendDebuggerModel : ServerModel serverModel serverMsg model msg -> Cmd (ServerMsg serverMsg)
+sendDebuggerModel serverModel = case (serverModel.socket, serverModel.client) of
+  (Just socket, Just cid) -> ServerWebSocket.send socket cid (Encode.encode 0 (toJSON serverModel.debugger))
+  _ -> Cmd.none
 
 -- PROCEDURE
 
@@ -120,25 +120,29 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
   -- SetState cid state -> rpc HandleSetState (\serverModel -> (serverModel, Task.succeed (), Cmd.none))
   PauseDebugger -> rpc Handle
     (\serverModel -> case serverModel.debugger.appState of
-      Running state -> let debugger = serverModel.debugger in ({ serverModel | debugger = { debugger | appState = Paused (PausedState state.appModel state.messages ((Array.length state.messages) - 1) (RunningState state.appModel Array.empty)) }}, Task.succeed (), Cmd.none)
+      Running state -> let debugger = serverModel.debugger in
+        ({ serverModel | debugger = { debugger | appState = Paused (PausedState state.appModel state.messages ((Array.length state.messages) - 1) (RunningState state.appModel Array.empty)) }}
+        , Task.succeed (), sendDebuggerModel serverModel)
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
   ResumeDebugger -> rpc Handle
     (\serverModel -> case serverModel.debugger.appState of
-      Paused state -> let debugger = serverModel.debugger in ({ serverModel | debugger = { debugger | appState = Running (RunningState state.background.appModel (Array.append state.pausedMessages state.background.messages)) }}, Task.succeed (), Cmd.none)
+      Paused state -> let debugger = serverModel.debugger in
+        ({ serverModel | debugger = { debugger | appState = Running (RunningState state.background.appModel (Array.append state.pausedMessages state.background.messages)) }}
+        , Task.succeed (), sendDebuggerModel serverModel)
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
   GoBackDebugger index -> rpc Handle
     (\serverModel -> let debugger = serverModel.debugger in case serverModel.debugger.appState of
-      Running state -> ({ serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.messages) state.messages index (RunningState state.appModel Array.empty))  }}, Task.succeed (), Cmd.none)
-      Paused state -> ({ serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedMessages) state.pausedMessages index state.background) }}, Task.succeed (), Cmd.none))
+      Running state -> ({ serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.messages) state.messages index (RunningState state.appModel Array.empty))  }}, Task.succeed (), sendDebuggerModel serverModel)
+      Paused state -> ({ serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedMessages) state.pausedMessages index state.background) }}, Task.succeed (), sendDebuggerModel serverModel))
 
 
   RemoteServerAppMsg msg ->
     RPC.map AppMsg ServerAppMsg
       (\appModel serverModel -> let debugger = serverModel.debugger in case serverModel.debugger.appState of
-        Running state -> { serverModel | debugger = { debugger | appState = Running { state | appModel = appModel }}}
-        Paused state -> let background = state.background in { serverModel | debugger = { debugger | appState = Paused { state | background = { background | appModel = appModel }}}})
+        Running state -> { serverModel | debugger = { debugger | appState = Running { state | appModel = appModel }}} ! [sendDebuggerModel serverModel]
+        Paused state -> let background = state.background in { serverModel | debugger = { debugger | appState = Paused { state | background = { background | appModel = appModel }}}} ! [sendDebuggerModel serverModel])
       (\serverModel -> case serverModel.debugger.appState of
         Running state -> state.appModel
         Paused state -> state.background.appModel)
