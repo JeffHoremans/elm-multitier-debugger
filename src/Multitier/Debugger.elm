@@ -18,7 +18,7 @@ import Multitier exposing (Config, MultitierCmd, MultitierProgram, (!!), perform
 import Multitier.RPC as RPC exposing (RPC, rpc)
 import Multitier.Error exposing (Error)
 import Multitier.Server.WebSocket as ServerWebSocket exposing (WebSocket, ClientId)
-import Multitier.Server.Console as Console
+-- import Multitier.Server.Console as Console
 import Multitier.LowLevel exposing (toJSON, fromJSONString)
 
 type ResumeStrategy = FromPrevious | FromPaused | FromBackground
@@ -101,7 +101,7 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
       RequestDebugger (cid, _) -> { serverModel | client = Just cid } ! []
       Nothing -> serverModel ! []
     in case (newServerModel.socket,newServerModel.client) of
-      (Just socket, Just cid) -> newServerModel ! [newCmds, sendDebuggerModel socket cid newServerModel, Console.log "sending..."]
+      (Just socket, Just cid) -> newServerModel ! [newCmds, sendDebuggerModel socket cid newServerModel]
       _ -> newServerModel ! [newCmds]
 
 sendDebuggerModel : WebSocket -> ClientId -> ServerModel serverModel serverMsg model msg -> Cmd (ServerMsg serverMsg)
@@ -223,12 +223,14 @@ wrapUpdate update = \msg model -> case model of
       Result.Err err -> model !! [] -- TODO error in view
       _ -> model !! []
 
-    SetServerModel data -> ServerDebugger (Just (fromJSONString data)) !! []
     _ -> model !! []
 
 
   ServerDebugger sm -> case sm of
     Just smodel -> case msg of
+
+      SetServerModel data -> ServerDebugger (Just (fromJSONString data)) !! []
+
       Pause -> model !! [performOnServer PauseDebugger]
       Resume -> model !! [performOnServer ResumeDebugger]
       GoBack index -> model !! [performOnServer (GoBackDebugger index)]
