@@ -98,7 +98,9 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
           in { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push (serverAppMsg, newAppModel) state.background.messages) }}} ! [Cmd.map ServerAppMsg cmd]
 
       OnSocketOpen socket -> { serverModel | socket = Just socket } ! []
-      OnClientConnect cid -> serverModel ! []
+      OnClientConnect cid -> case serverModel.socket of
+        Just socket -> serverModel ! [ServerWebSocket.send socket cid (Encode.encode 0 (toJSON (SetClientId cid)))]
+        _ -> serverModel ! []
       OnClientDisconnect cid -> serverModel ! []
 
       Nothing -> serverModel ! []
@@ -106,7 +108,7 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
 
 sendDebuggerModel : ServerModel serverModel serverMsg model msg -> Cmd (ServerMsg serverMsg)
 sendDebuggerModel serverModel = case (serverModel.socket, serverModel.client) of
-  (Just socket, Just cid) -> ServerWebSocket.send socket cid (Encode.encode 0 (toJSON serverModel.debugger))
+  (Just socket, Just cid) -> ServerWebSocket.send socket cid (Encode.encode 0 (toJSON (SetServerModel serverModel.debugger)))
   _ -> Cmd.none
 
 -- PROCEDURE
