@@ -212,7 +212,7 @@ type alias ClientModel appModel appMsg  =
 type ClientEvent appMsg = Init | MsgEvent appMsg
 
 wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg serverModel serverMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg)))
-wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (ClientDebugger Maybe.Nothing (ClientModel (Running (RunningState model Array.empty)) True FromBackground), Multitier.map RemoteServerAppMsg AppMsg cmd)
+wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (ClientDebugger Maybe.Nothing (ClientModel (Running (RunningState model (Array.fromList [(Init,model)]))) True FromBackground), Multitier.map RemoteServerAppMsg AppMsg cmd)
 
 type Msg model msg serverModel serverMsg =
   AppMsg msg |
