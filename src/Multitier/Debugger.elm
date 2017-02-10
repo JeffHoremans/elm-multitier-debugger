@@ -373,13 +373,21 @@ wrapView appView = \model -> case model of
         Html.div [] [
           Html.button [onClick SwitchDebugger] [Html.text "Switch to client"],
           serverActions smodel actionProps,
-          serverEventsView appModel events previousIndex]
+          serverEventsView appModel events previousIndex,
+          clientEventsView smodel.clientStates]
         in case smodel.appState of
           Running state ->
             view state.appModel state.events ((Array.length state.events) - 1) [] (ActionProps Pause "Pause" False True)
           Paused state ->
             view state.pausedModel state.pausedEvents state.previousIndex [disabled True, onClick Resume, style [("opacity", "0.25")]] (ActionProps Resume "Resume" True False)
     _ -> Html.text "loading..."
+
+clientEventsView : Dict String (ClientId, ClientDebuggerModel model msg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
+clientEventsView clientStates =
+  clientStates
+    |> Dict.toList
+    |> List.map (\(_, (cid,cmodel)) -> Html.div [] [Html.text (toString cmodel)] )
+    |> Html.div []
 
 serverEventsView : serverModel -> Array ((ServerEvent serverMsg remoteServerMsg), serverModel) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 serverEventsView appModel events previousIndex =
