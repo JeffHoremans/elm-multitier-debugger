@@ -103,7 +103,7 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
       OnClientConnect cid -> case serverModel.socket of
         Just socket -> serverModel ! [ServerWebSocket.send socket cid (Encode.encode 0 (toJSON (SetClientId cid)))]
         _ -> serverModel ! []
-      OnClientDisconnect cid -> serverModel ! []
+      OnClientDisconnect cid -> {serverModel | clients = Dict.remove (toString cid) serverModel.clients } ! []
 
       Nothing -> serverModel ! []
     in newServerModel ! [newCmds, sendDebuggerModel newServerModel]
