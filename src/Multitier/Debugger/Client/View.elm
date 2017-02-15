@@ -74,10 +74,13 @@ timelineView appModel events previousIndex =
     |> Array.indexedMap (,)
     |> Array.map (\(index, (msg, model)) ->
       Svg.circle [r "5", cx (toString (index * 5)), cy "20"] [])
+    |> Array.toList
   in
   Html.div [style [("overflow-x", "auto")]] [
-    Svg.svg [ width "100%", height "40"] [
-      Svg.line [x1 "0", y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []]]
+    Svg.svg [ width (toString ((Array.length events) * 5)), height "40"]
+      (List.concat [
+        [Svg.line [x1 "0", y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []],
+        circles ])]
 
 
 clientEventsView : Dict String (ClientId, ClientDebuggerModel model msg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
