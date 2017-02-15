@@ -135,7 +135,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
   -- SetState cid state -> rpc HandleSetState (\serverModel -> (serverModel, Task.succeed (), Cmd.none))
 
   StartDebugView cid -> rpc HandleStartDebugView (\serverModel -> ({serverModel | clients = Dict.insert (toString cid) cid serverModel.clients }, Task.succeed (serverModel.debugger), Cmd.none))
-  StopDebugView cid -> rpc Handle (\serverModel -> ({ serverModel | clients = Dict.remove (toString cid) serverModel.clients }, Task.succeed (), Cmd.none))
+  StopDebugView cid -> rpc HandleStopDebugView (\serverModel -> ({ serverModel | clients = Dict.remove (toString cid) serverModel.clients }, Task.succeed (), Cmd.none))
 
   SetClientDebuggerModel cid model -> rpc Handle
     (\serverModel -> let debugger = serverModel.debugger in
