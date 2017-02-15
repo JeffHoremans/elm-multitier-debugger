@@ -325,7 +325,7 @@ wrapUpdate update = \msg model ->
         _ -> ClientDebugger cid cmodel !! []
       _ -> model !! []
 
-  in newModel !! [newCmd, sendClientDebuggerModelIfNeeded newModel]
+  in newModel !! [newCmd] -- TODO sendModel
 
 updateAppModel : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> Model model msg serverModel serverMsg remoteServerMsg -> msg -> ClientId -> ClientDebuggerModel model msg -> (ClientDebuggerModel model msg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
 updateAppModel update model appMsg cid cmodel = case cmodel.appState of
@@ -344,14 +344,8 @@ getPreviousAppModel appModel index events = case Array.get index events of
 getPreviousEvents : Int -> Array (appMsg, appModel) -> Array (appMsg, appModel)
 getPreviousEvents index events = events |> Array.slice 0 (index+1)
 
-sendClientDebuggerModelIfNeeded : Model model msg serverModel serverMsg remoteServerMsg -> MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg)
-sendClientDebuggerModelIfNeeded model =
-  let send = \cid cmodel -> performOnServer (SetClientDebuggerModel cid cmodel) in
-    case model of
-      ClientDebugger cid cmodel -> send cid cmodel
-      Switching cid cmodel -> send cid cmodel
-      ServerDebugger cid smodel cmodel -> send cid cmodel
-      _ -> Multitier.none
+sendModel : ClientId -> ClientDebuggerModel model msg -> MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg)
+sendModel cid cmodel = performOnServer (SetClientDebuggerModel cid cmodel)
 
 -- SUBSCRIPTIONS
 
