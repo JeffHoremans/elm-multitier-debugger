@@ -73,13 +73,13 @@ timelineView appModel events previousIndex =
   let circles = events
     |> Array.indexedMap (,)
     |> Array.map (\(index, (msg, model)) ->
-      Svg.circle [r "5", cx (toString (index * 25)), cy "20"] [])
+      Svg.circle [r "5", cx (toString (index * 25)), cy "20", onClick (GoBack index)] [])
     |> Array.toList
   in
   Html.div [style [("overflow-x", "auto")]] [
-    Svg.svg [ width (toString ((Array.length events) * 25)), height "40"]
+    Svg.svg [ width (toString (((Array.length events) - 1) * 25)), height "40"]
       (List.concat [
-        [Svg.line [x1 "0", y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []],
+        [Svg.line [x1 "5", y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []],
         circles ])]
 
 
