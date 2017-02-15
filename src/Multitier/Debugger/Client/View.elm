@@ -8,7 +8,7 @@ import Html.Events exposing (onClick, onCheck, on)
 import Array exposing (Array)
 import Dict exposing (Dict)
 import Svg
-import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy)
+import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy, fill)
 
 import Multitier.Server.WebSocket exposing (ClientId)
 
@@ -73,7 +73,7 @@ timelineView appModel events previousIndex =
   let circles = events
     |> Array.indexedMap (,)
     |> Array.map (\(index, (msg, model)) ->
-      Svg.circle [r "5", cx (toString (index * 25)), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] [])
+      Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString (index * 25)), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] [])
     |> Array.toList
   in
   Html.div [style [("overflow-x", "auto")]] [
