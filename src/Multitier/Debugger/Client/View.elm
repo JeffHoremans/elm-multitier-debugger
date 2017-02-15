@@ -87,7 +87,10 @@ clientEventsView : Dict String (ClientId, ClientDebuggerModel model msg) -> Html
 clientEventsView clientStates =
   clientStates
     |> Dict.toList
-    |> List.map (\(_, (cid,cmodel)) -> Html.div [] [Html.text (toString cmodel)] )
+    |> List.map (\(_, (cid,cmodel)) -> let appModel = case cmodel.appState of
+        Running state -> state.appModel
+        Paused state -> state.pausedModel
+      in Html.div [] [Html.text (toString appModel)] )
     |> Html.div []
 
 serverEventsView : serverModel -> Array ((ServerEvent serverMsg remoteServerMsg), serverModel) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
