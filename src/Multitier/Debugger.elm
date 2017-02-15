@@ -390,20 +390,20 @@ resumeToString resume = case resume of
 wrapView : (model -> Html msg) -> (Model model msg serverModel serverMsg remoteServerMsg -> Html (Msg model msg serverModel serverMsg remoteServerMsg))
 wrapView appView = \model -> case model of
   Uninitialized _ -> Html.text "Registering on server..."
+
   ClientDebugger _ cmodel ->
-    let view appModel events previousIndex divAtt actionProps =
+    let view appModel events previousIndex divAtt =
       Html.div [] [
         Html.div divAtt [
           Html.map AppMsg (appView appModel)],
         Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
           Html.button [onClick SwitchDebugger] [Html.text "Switch to server"],
-          actions cmodel actionProps,
           eventsView appModel events previousIndex]]
       in case cmodel.appState of
         Running state ->
-          view state.appModel state.events ((Array.length state.events) - 1) [] (ActionProps Pause "Pause" False True)
+          view state.appModel state.events ((Array.length state.events) - 1) [] -- (ActionProps Pause "Pause" False True)
         Paused state ->
-          view state.pausedModel state.pausedEvents state.previousIndex [disabled True, onClick Resume, style [("opacity", "0.25")]] (ActionProps Resume "Resume" True False)
+          view state.pausedModel state.pausedEvents state.previousIndex [disabled True, onClick Resume, style [("opacity", "0.25")]] -- (ActionProps Resume "Resume" True False)
 
   Switching cid smodel -> Html.text "Switching to server debugger..."
 
