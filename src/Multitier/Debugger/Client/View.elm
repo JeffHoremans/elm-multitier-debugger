@@ -77,7 +77,7 @@ timelineView appModel events previousIndex =
     |> Array.toList
   in
   Html.div [style [("overflow-x", "auto")]] [
-    Svg.svg [ width (toString ((Array.length events) * 5)), height "40"]
+    Svg.svg [ width (toString ((Array.length events) * 25)), height "40"]
       (List.concat [
         [Svg.line [x1 "0", y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []],
         circles ])]
