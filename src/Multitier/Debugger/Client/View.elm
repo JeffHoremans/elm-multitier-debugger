@@ -73,7 +73,7 @@ timelineView appModel events previousIndex =
   let circles = events
     |> Array.indexedMap (,)
     |> Array.map (\(index, (msg, model)) ->
-      Svg.circle [r "5", cx (toString (index * 25)), cy "20", onClick (GoBack index)] [])
+      Svg.circle [r "5", cx (toString (index * 25)), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] [])
     |> Array.toList
   in
   Html.div [style [("overflow-x", "auto")]] [
