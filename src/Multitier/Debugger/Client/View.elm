@@ -70,16 +70,18 @@ wrapView appView = \model -> case model of
 
 timelineView : serverModel -> Array ((ServerEvent serverMsg remoteServerMsg), serverModel) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 timelineView appModel events previousIndex =
-  let circles = events
+  let offset = 10
+      eventSpacing = 25
+      circles = events
     |> Array.indexedMap (,)
     |> Array.map (\(index, (msg, model)) ->
-      Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString (index * 25)), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] [])
+      Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] [])
     |> Array.toList
   in
   Html.div [style [("overflow-x", "auto")]] [
-    Svg.svg [ width (toString (((Array.length events) - 1) * 25)), height "40"]
+    Svg.svg [ width (toString (((Array.length events) - 1) * eventSpacing)), height "40"]
       (List.concat [
-        [Svg.line [x1 "5", y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []],
+        [Svg.line [x1 (toString offset), y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []],
         circles ])]
 
 
