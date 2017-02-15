@@ -1,6 +1,7 @@
 module Multitier.Debugger
   exposing
-    ( program )
+    ( program
+    , Model, ServerModel, Msg, ServerMsg)
 
 import Html exposing (Html)
 
@@ -9,7 +10,7 @@ import Multitier.RPC as RPC exposing (RPC)
 
 import Multitier.Debugger.Client.Model as Model exposing (Model(..))
 import Multitier.Debugger.Client.View as View
-import Multitier.Debugger.Client.Msg exposing (Msg(..), SocketMsg(..))
+import Multitier.Debugger.Client.Msg as Msg exposing (Msg(..), SocketMsg(..))
 import Multitier.Debugger.Client.Update as Update exposing (wrapUpdate)
 import Multitier.Debugger.Client.Subscriptions as Subscriptions exposing (wrapSubscriptions)
 import Multitier.Debugger.Client.Update as Update exposing (wrapUpdate)
@@ -48,3 +49,8 @@ program stuff = Multitier.program
     , updateServer = ServerUpdate.wrapUpdateServer stuff.updateServer
     , serverSubscriptions = ServerSubscriptions.wrapServerSubscriptions stuff.serverSubscriptions
     }
+
+type alias Model model msg serverModel serverMsg remoteServerMsg = Model.Model model msg serverModel serverMsg remoteServerMsg
+type alias ServerModel serverModel serverMsg remoteServerMsg model msg = ServerModel.ServerModel serverModel serverMsg remoteServerMsg model msg
+type alias Msg model msg serverModel serverMsg remoteServerMsg = Msg.Msg model msg serverModel serverMsg remoteServerMsg
+type alias ServerMsg serverMsg = ServerMsg.ServerMsg serverMsg
