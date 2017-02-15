@@ -213,7 +213,10 @@ wrapServerSubscriptions serverSubscriptions =
 
 -- MODEL
 
-type Model model msg serverModel serverMsg remoteServerMsg = ClientDebugger (Maybe ClientId) (ClientDebuggerModel model msg) | ServerDebugger ClientId (Maybe (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg))
+type Model model msg serverModel serverMsg remoteServerMsg =
+  Uninitialized (model, MultitierCmd remoteServerMsg msg) |
+  ClientDebugger ClientId (ClientDebuggerModel model msg) |
+  ServerDebugger ClientId (Maybe (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg))
 
 type alias ClientDebuggerModel appModel appMsg  =
   { appState : AppState appModel (ClientEvent appMsg)
@@ -223,7 +226,8 @@ type alias ClientDebuggerModel appModel appMsg  =
 type ClientEvent appMsg = Init | MsgEvent appMsg
 
 wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg serverModel serverMsg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg)))
-wrapInit init = \serverState -> let (model, cmd) = init serverState.appState in (ClientDebugger Maybe.Nothing (ClientDebuggerModel (Running (RunningState model (Array.fromList [(Init,model)]))) True FromBackground), Multitier.map RemoteServerAppMsg AppMsg cmd)
+wrapInit init = \serverState -> Uninitialized (init serverState.appState) !! []
+    -- (ClientDebugger Maybe.Nothing (ClientDebuggerModel (Running (RunningState model (Array.fromList [(Init,model)]))) True FromBackground), Multitier.map RemoteServerAppMsg AppMsg cmd)
 
 type Msg model msg serverModel serverMsg remoteServerMsg =
   AppMsg msg |
@@ -238,16 +242,21 @@ type Msg model msg serverModel serverMsg remoteServerMsg =
   Handle (Result Error ()) |
   HandleStartDebugView (Result Error (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg))
 
-type ServerSocketMsg serverModel serverMsg remoteServerMsg model msg = SetClientId ClientId | SetServerModel (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg)
+type SocketMsg serverModel serverMsg remoteServerMsg model msg = SetClientId ClientId | SetServerModel (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg)
+
+-- TODO split in submodules
 
 wrapUpdate : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> (Msg model msg serverModel serverMsg remoteServerMsg -> Model model msg serverModel serverMsg remoteServerMsg -> ( Model model msg serverModel serverMsg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) ))
 wrapUpdate update = \msg model ->
   let (newModel, newCmd) = case model of
-    ClientDebugger cid cmodel -> case msg of
-      OnServerSocketMsg data -> case (fromJSONString data) of
-        SetClientId clientId -> ClientDebugger (Just clientId) cmodel !! []
-        _ -> model !! []
 
+    Uninitialized (appModel, cmd) -> case msg of
+      OnServerSocketMsg data -> case (fromJSONString data) of
+        SetClientId clientId -> ClientDebugger clientId (ClientDebuggerModel (Running (RunningState appModel (Array.fromList [(Init, appModel)]))) True FromBackground) !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
+        _ -> model !! []
+      _ -> model !! []
+
+    ClientDebugger cid cmodel -> case msg of
       AppMsg appMsg -> case cmodel.appState of
         Running state -> let (newAppModel, cmd) = update appMsg state.appModel
           in  ClientDebugger cid { cmodel | appState = Running (RunningState newAppModel (Array.push ((MsgEvent appMsg), newAppModel) state.events))} !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
@@ -275,15 +284,14 @@ wrapUpdate update = \msg model ->
         Just resume -> ClientDebugger cid { cmodel | resume = resume } !! []
         _ -> model !! []
 
-      SwitchDebugger -> case cid of
-        Just clientId -> ServerDebugger clientId Maybe.Nothing !! [performOnServer (StartDebugView clientId)]
-        _ -> model !! [] -- TODO report error
+      SwitchDebugger -> ServerDebugger cid Maybe.Nothing !! [performOnServer (StartDebugView cid)]
 
       Handle result -> case result of
         Result.Err err -> model !! [] -- TODO error in view
         _ -> model !! []
 
       HandleStartDebugView result -> model !! []
+      OnServerSocketMsg _ -> model !! []
 
 
     ServerDebugger cid sm -> case sm of
@@ -315,16 +323,15 @@ getPreviousEvents index events = events |> Array.slice 0 (index+1)
 
 sendClientDebuggerModelIfNeeded : Model model msg serverModel serverMsg remoteServerMsg -> MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg)
 sendClientDebuggerModelIfNeeded model = case model of
-  ServerDebugger cid smodel -> Multitier.none
-  ClientDebugger cid cmodel -> case cid of
-    Just clientId -> performOnServer (SetClientDebuggerModel clientId cmodel)
-    _ -> Multitier.none
+  ClientDebugger cid cmodel -> performOnServer (SetClientDebuggerModel cid cmodel)
+  _ -> Multitier.none
 
 -- SUBSCRIPTIONS
 
 wrapSubscriptions : (model -> Sub msg) -> (Model model msg serverModel serverMsg remoteServerMsg -> Sub (Msg model msg serverModel serverMsg remoteServerMsg))
 wrapSubscriptions subscriptions = \model ->
   let subs = case model of
+    Uninitialized _ -> Sub.none
     ClientDebugger _ cmodel ->
       case cmodel.appState of
         Running state -> Sub.map AppMsg (subscriptions state.appModel)
@@ -354,6 +361,7 @@ resumeToString resume = case resume of
 
 wrapView : (model -> Html msg) -> (Model model msg serverModel serverMsg remoteServerMsg -> Html (Msg model msg serverModel serverMsg remoteServerMsg))
 wrapView appView = \model -> case model of
+  Uninitialized _ -> Html.text "Registering on server..."
   ClientDebugger _ cmodel ->
     let view appModel events previousIndex divAtt actionProps =
       Html.div [] [
