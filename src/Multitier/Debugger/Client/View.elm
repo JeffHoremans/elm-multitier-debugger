@@ -7,6 +7,8 @@ import Html.Attributes exposing (style, disabled, selected, size, checked, type_
 import Html.Events exposing (onClick, onCheck, on)
 import Array exposing (Array)
 import Dict exposing (Dict)
+import Svg
+import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy)
 
 import Multitier.Server.WebSocket exposing (ClientId)
 
@@ -57,13 +59,26 @@ wrapView appView = \model -> case model of
           Html.button [onClick SwitchDebugger] [Html.text "Switch to client"],
           serverActions smodel actionProps,
           serverEventsView appModel events previousIndex,
-          clientEventsView smodel.clientStates]
+          clientEventsView smodel.clientStates,
+          timelineView appModel events previousIndex]
         in case smodel.appState of
           Running state ->
             view state.appModel state.events ((Array.length state.events) - 1) [] (ActionProps Pause "Pause" False True)
           Paused state ->
             view state.pausedModel state.pausedEvents state.previousIndex [disabled True, onClick Resume, style [("opacity", "0.25")]] (ActionProps Resume "Resume" True False)
     _ -> Html.text "loading..."
+
+timelineView : serverModel -> Array ((ServerEvent serverMsg remoteServerMsg), serverModel) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
+timelineView appModel events previousIndex =
+  let circles = events
+    |> Array.indexedMap (,)
+    |> Array.map (\(index, (msg, model)) ->
+      Svg.circle [r "5", cx (toString (index * 5)), cy "20"] [])
+  in
+  Html.div [style [("overflow-x", "auto")]] [
+    Svg.svg [ width "100%", height "40"] [
+      Svg.line [x1 "0", y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []]]
+
 
 clientEventsView : Dict String (ClientId, ClientDebuggerModel model msg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 clientEventsView clientStates =
