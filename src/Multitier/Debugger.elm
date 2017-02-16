@@ -176,7 +176,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
       Paused state ->
         let debugger = serverModel.debugger in
           let newServerModel = { serverModel | debugger = { debugger | appState = Running (RunningState state.background.appModel (Array.append state.pausedEvents state.background.events)) }} in
-            (newServerModel, Task.succeed (), Cmd.batch [broadcastPauseAction serverModel.socket, sendDebuggerModel newServerModel])
+            (newServerModel, Task.succeed (), Cmd.batch [broadcastResumeAction serverModel.socket, sendDebuggerModel newServerModel])
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
   GoBackDebugger index -> rpc Handle
