@@ -272,11 +272,7 @@ wrapServerSubscriptions serverSubscriptions =
   \serverModel ->
     let appSubs = case serverModel.debugger.appState of
       Running state -> Sub.map ServerAppMsg (serverSubscriptions state.appModel)
-      Paused state -> if serverModel.debugger.resuming then
-        (case serverModel.debugger.resume of
-          FromBackground -> if serverModel.debugger.runInBackground then Sub.map ServerAppMsg (serverSubscriptions state.background.appModel) else Sub.none
-          _ -> Sub.none)
-       else if serverModel.debugger.runInBackground then Sub.map ServerAppMsg (serverSubscriptions state.background.appModel) else Sub.none
+      Paused state -> if serverModel.debugger.runInBackground then Sub.map ServerAppMsg (serverSubscriptions state.background.appModel) else Sub.none
     in Sub.batch [appSubs, ServerWebSocket.listen "debugger" OnSocketOpen OnClientConnect OnClientDisconnect (always Nothing)]
 
 -- MODEL
