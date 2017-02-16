@@ -91,7 +91,6 @@ type alias ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg =
   { appState: AppState (ServerEvent serverMsg remoteServerMsg) serverModel (Cmd serverMsg)
   , runInBackground : Bool
   , resume : ResumeStrategy
-  , resuming : Bool
   , clientStates : Dict String (ClientId, ClientDebuggerModel model msg remoteServerMsg) }
 
 type ServerEvent serverMsg remoteServerMsg = InitServer | ServerMsgEvent serverMsg | StateEvent | RPCevent remoteServerMsg
@@ -104,12 +103,9 @@ wrapInitServer (serverModel, cmd) =
     { appState = Running (RunningState serverModel (Array.fromList [(InitServer,serverModel, cmd)]))
     , clientStates = Dict.empty
     , resume = FromBackground
-    , resuming = False
     , runInBackground = True }} ! [Cmd.map ServerAppMsg cmd]
 
 type ServerMsg serverMsg = ServerAppMsg serverMsg |
-                           ResumeServer () |
-
                            OnSocketOpen WebSocket | OnClientConnect ClientId | OnClientDisconnect ClientId |
                            Nothing
 
@@ -124,16 +120,6 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
           True -> let (newAppModel, cmd) = updateServer serverAppMsg state.background.appModel
             in { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push ((ServerMsgEvent serverAppMsg), newAppModel, cmd) state.background.events) }}} ! [Cmd.map ServerAppMsg cmd]
           _ -> serverModel ! []
-
-      ResumeServer _ -> case serverModel.debugger.appState of
-        Paused state -> let debugger = serverModel.debugger in
-            let (newServerModel, newServerCmd) = case serverModel.debugger.resume of
-              FromPrevious -> { serverModel | debugger = { debugger | resuming = False, appState = Running (RunningState state.pausedModel (getPreviousEvents state.previousIndex state.pausedEvents)) }} ! [Cmd.map ServerAppMsg state.pausedCmd]
-              FromPaused -> let (previousAppModel, previousCmd) = (getPreviousAppModel state.pausedModel Cmd.none ((Array.length state.pausedEvents) - 1) state.pausedEvents)
-                in { serverModel | debugger = { debugger | resuming = False, appState = Running (RunningState previousAppModel state.pausedEvents) }} ! [Cmd.map ServerAppMsg previousCmd]
-              FromBackground -> { serverModel | debugger = { debugger | resuming = False, appState = Running (RunningState state.background.appModel (Array.append state.pausedEvents state.background.events)) }} ! []
-            in newServerModel ! [newServerCmd, broadcastResumeAction serverModel.socket, sendDebuggerModel newServerModel]
-        _ -> serverModel ! []
       OnSocketOpen socket -> { serverModel | socket = Just socket } ! []
       OnClientConnect cid -> serverModel ! [initializeClient serverModel cid]
       OnClientDisconnect cid -> {serverModel | clients = Dict.remove (toString cid) serverModel.clients } ! []
@@ -206,14 +192,14 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
 
   ResumeDebugger -> rpc Handle
     (\serverModel -> case serverModel.debugger.appState of
-      Paused state -> let debugger = serverModel.debugger in ({serverModel | debugger = { debugger | resuming = True }}, Task.succeed (), Task.perform ResumeServer (Task.succeed ()))
-        -- let debugger = serverModel.debugger in
-        --   let (newServerModel, newServerCmd) = case serverModel.debugger.resume of
-        --     FromPrevious -> { serverModel | debugger = { debugger | appState = Running (RunningState state.pausedModel (getPreviousEvents state.previousIndex state.pausedEvents)) }} ! [Cmd.map ServerAppMsg state.pausedCmd]
-        --     FromPaused -> let (previousAppModel, previousCmd) = (getPreviousAppModel state.pausedModel Cmd.none ((Array.length state.pausedEvents) - 1) state.pausedEvents)
-        --       in { serverModel | debugger = { debugger | appState = Running (RunningState previousAppModel state.pausedEvents) }} ! [Cmd.map ServerAppMsg previousCmd]
-        --     FromBackground -> { serverModel | debugger = { debugger | appState = Running (RunningState state.background.appModel (Array.append state.pausedEvents state.background.events)) }} ! [] in
-        --    (newServerModel, Task.succeed (), Cmd.batch [newServerCmd, broadcastResumeAction serverModel.socket, sendDebuggerModel newServerModel])
+      Paused state ->
+        let debugger = serverModel.debugger in
+          let (newServerModel, newServerCmd) = case serverModel.debugger.resume of
+            FromPrevious -> { serverModel | debugger = { debugger | appState = Running (RunningState state.pausedModel (getPreviousEvents state.previousIndex state.pausedEvents)) }} ! [Cmd.map ServerAppMsg state.pausedCmd]
+            FromPaused -> let (previousAppModel, previousCmd) = (getPreviousAppModel state.pausedModel Cmd.none ((Array.length state.pausedEvents) - 1) state.pausedEvents)
+              in { serverModel | debugger = { debugger | appState = Running (RunningState previousAppModel state.pausedEvents) }} ! [Cmd.map ServerAppMsg previousCmd]
+            FromBackground -> { serverModel | debugger = { debugger | appState = Running (RunningState state.background.appModel (Array.append state.pausedEvents state.background.events)) }} ! [] in
+           (newServerModel, Task.succeed (), Cmd.batch [newServerCmd, broadcastResumeAction serverModel.socket, sendDebuggerModel newServerModel])
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
   ToggleRunInBackgroundDebugger runInBackground ->
