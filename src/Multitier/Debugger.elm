@@ -293,7 +293,7 @@ wrapUpdate update = \msg model -> case model of
         let newcmodel = case paused of
           False -> (ClientDebuggerModel (Running (RunningState appModel (Array.fromList [(Init, appModel)]))) --True FromBackground
                                                                                                                                         )
-          True -> (ClientDebuggerModel (Paused (PausedState appModel (Array.fromList [(Init, appModel)]) 0 (RunningState appModel (Array.fromList [(Init, appModel)]))))) in
+          True -> (ClientDebuggerModel (Paused (PausedState appModel (Array.fromList [(Init, appModel)]) 0 (RunningState appModel Array.empty)))) in
         ClientDebugger clientId newcmodel !! [Multitier.map RemoteServerAppMsg AppMsg cmd, performOnServer (SetClientDebuggerModel clientId newcmodel)]
       _ -> model !! []
     _ -> model !! []
