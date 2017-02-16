@@ -150,6 +150,9 @@ broadcastPauseAction socket = broadcastSocketMsg socket (PauseClient)
 broadcastResumeAction : Maybe WebSocket -> Cmd (ServerMsg serverMsg)
 broadcastResumeAction socket = broadcastSocketMsg socket (ResumeClient)
 
+broadcastGoBackAction : Maybe WebSocket -> Cmd (ServerMsg serverMsg)
+broadcastGoBackAction socket = broadcastSocketMsg socket (GoBackClient)
+
 broadcastSocketMsg : Maybe WebSocket -> SocketMsg serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
 broadcastSocketMsg maybeSocket msg = case maybeSocket of
   Just socket -> ServerWebSocket.broadcast socket (Encode.encode 0 (toJSON msg))
@@ -212,11 +215,11 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
       Running state ->
         let (previousAppModel, previousCmd) = (getPreviousAppModel state.appModel Cmd.none index state.events) in
           let newServerModel = { serverModel | debugger = { debugger | appState = Paused (PausedState previousAppModel previousCmd state.events index (RunningState state.appModel Array.empty))  }} in
-            (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
+            (newServerModel, Task.succeed (), Cmd.batch [broadcastPauseAction serverModel.socket, sendDebuggerModel newServerModel])
       Paused state ->
         let (previousAppModel, previousCmd) = (getPreviousAppModel state.pausedModel Cmd.none index state.pausedEvents) in
         let newServerModel = { serverModel | debugger = { debugger | appState = Paused (PausedState previousAppModel previousCmd state.pausedEvents index state.background) }} in
-          (newServerModel, Task.succeed (), sendDebuggerModel newServerModel))
+          (newServerModel, Task.succeed (), Cmd.batch [broadcastPauseAction serverModel.socket, sendDebuggerModel newServerModel]))
 
 
   RemoteServerAppMsg msg ->
@@ -300,7 +303,7 @@ type SocketMsg serverModel serverMsg remoteServerMsg model msg =
   InitializeClient InitData |
   SetServerModel (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg) |
 
-  PauseClient | ResumeClient
+  PauseClient | ResumeClient | GoBackClient
 
 -- TODO split in submodules
 
@@ -324,6 +327,7 @@ wrapUpdate update = \msg model -> case model of
     OnSocketMsg data -> case (fromJSONString data) of
       PauseClient -> let (newcmodel, cmd) = pauseClient cid cmodel in ClientDebugger cid newcmodel !! [cmd]
       ResumeClient -> let (newcmodel, cmd) = resumeClient cid cmodel in ClientDebugger cid newcmodel !! [cmd]
+      GoBackClient -> let (newcmodel, cmd) = goBackClient cid cmodel in ClientDebugger cid newcmodel !! [cmd]
       _ -> model !! []
 
     -- GoBack index -> case cmodel.appState of
@@ -348,6 +352,7 @@ wrapUpdate update = \msg model -> case model of
     OnSocketMsg data -> case (fromJSONString data) of
       PauseClient -> let (newcmodel, cmd) = pauseClient cid cmodel in Switching cid newcmodel !! [cmd]
       ResumeClient -> let (newcmodel, cmd) = resumeClient cid cmodel in Switching cid newcmodel !! [cmd]
+      GoBackClient -> let (newcmodel, cmd) = goBackClient cid cmodel in ClientDebugger cid newcmodel !! [cmd]
       _ -> model !! []
 
     HandleStartDebugView result -> case result of
@@ -367,6 +372,7 @@ wrapUpdate update = \msg model -> case model of
       SetServerModel serverModel -> ServerDebugger cid serverModel cmodel !! []
       PauseClient -> let (newcmodel, cmd) = pauseClient cid cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
       ResumeClient -> let (newcmodel, cmd) = resumeClient cid cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
+      GoBackClient -> let (newcmodel, cmd) = goBackClient cid cmodel in ClientDebugger cid newcmodel !! [cmd]
       _ -> model !! []
 
     Pause -> model !! [performOnServer PauseDebugger]
@@ -395,6 +401,10 @@ resumeClient cid cmodel = case cmodel.appState of
     newcmodel !! [performOnServer (SetClientDebuggerModel cid newcmodel)]
   _ -> cmodel !! []
 
+goBackClient : ClientId -> ClientDebuggerModel model msg remoteServerMsg -> (ClientDebuggerModel model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
+goBackClient cid cmodel = case cmodel.appState of
+  Running state -> cmodel !! []
+  Paused state -> cmodel !! []
 
 updateAppModel : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> msg -> ClientId -> ClientDebuggerModel model msg remoteServerMsg -> (ClientDebuggerModel model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
 updateAppModel update appMsg cid cmodel = let (newcmodel, cmd) =
