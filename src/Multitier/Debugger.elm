@@ -334,7 +334,7 @@ updateAppModel update model appMsg cid cmodel = let (newcmodel, cmd) =
       True -> let (newAppModel, cmd) = update appMsg state.background.appModel
         in  { cmodel | appState = Paused { state | background = RunningState newAppModel (Array.push ((MsgEvent appMsg), newAppModel) state.background.events) }} !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
       False -> cmodel !! [] in
-    (newcmodel, performOnServer (SetClientDebuggerModel cid newcmodel))
+    (newcmodel, Multitier.batch [cmd, performOnServer (SetClientDebuggerModel cid newcmodel)])
 
 getPreviousAppModel : appModel -> Int -> Array (appMsg, appModel) -> appModel
 getPreviousAppModel appModel index events = case Array.get index events of
