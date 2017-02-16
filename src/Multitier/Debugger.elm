@@ -27,26 +27,34 @@ type ResumeStrategy = FromPrevious | FromPaused | FromBackground
 resumeStrategies : Array ResumeStrategy
 resumeStrategies = Array.fromList [FromPrevious, FromPaused, FromBackground]
 
-type AppState appModel appMsg =
-  Running (RunningState appModel appMsg) |
-  Paused (PausedState appModel appMsg)
+type AppState event model msg =
+  Running (RunningState event model msg) |
+  Paused (PausedState event model msg)
 
-type alias RunningState appModel appMsg =
-  { appModel : appModel
-  , events : Array (appMsg, appModel) }
+type alias EventStream event model cmd = Array (event, model, cmd)
 
-type alias PausedState appModel appMsg =
-  { pausedModel : appModel
-  , pausedEvents : Array (appMsg, appModel)
+type alias RunningState event model cmd =
+  { appModel : model
+  , events : EventStream event model cmd }
+
+type alias PausedState event model cmd =
+  { pausedModel : model
+  , pausedCmd : cmd
+  , pausedEvents : EventStream event model cmd
   , previousIndex : Int
-  , background : RunningState appModel appMsg }
+  , background : RunningState event model cmd }
 
-getPreviousAppModel : model -> Int -> Array (msg, model) -> model
-getPreviousAppModel appModel index events = case Array.get index events of
-  Just (_, model) -> model
-  _ -> appModel
+getPreviousAppModel : model -> cmd -> Int -> EventStream event model cmd -> (model, cmd)
+getPreviousAppModel appModel appCmd index events = case Array.get index events of
+  Just (_, model,cmd) -> (model, cmd)
+  _ -> (appModel, appCmd)
 
-getPreviousEvents : Int -> Array (msg, model) -> Array (msg, model)
+-- getPreviousAppModel : (model, cmd) -> Int -> EventStream event model cmd -> (model, cmd)
+-- getPreviousAppModel default index events = case Array.get index events of
+--   Just (_, model,cmd) -> (model,cmd)
+--   _ -> default
+
+getPreviousEvents : Int -> EventStream event model cmd -> EventStream event model cmd
 getPreviousEvents index events = events |> Array.slice 0 (index+1)
 
 -- PROGRAM
@@ -85,10 +93,10 @@ type alias ServerModel serverModel serverMsg remoteServerMsg model msg =
   , debugger: ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg }
 
 type alias ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg =
-  { appState: AppState serverModel (ServerEvent serverMsg remoteServerMsg)
+  { appState: AppState (ServerEvent serverMsg remoteServerMsg) serverModel (Cmd serverMsg)
   , runInBackground : Bool
   , resume : ResumeStrategy
-  , clientStates : Dict String (ClientId, ClientDebuggerModel model msg) }
+  , clientStates : Dict String (ClientId, ClientDebuggerModel model msg remoteServerMsg) }
 
 type ServerEvent serverMsg remoteServerMsg = InitServer | ServerMsgEvent serverMsg | StateEvent | RPCevent remoteServerMsg
 
@@ -97,7 +105,7 @@ wrapInitServer (serverModel, cmd) =
   { socket = Maybe.Nothing
   , clients = Dict.empty
   , debugger =
-    { appState = Running (RunningState serverModel (Array.fromList [(InitServer,serverModel)]))
+    { appState = Running (RunningState serverModel (Array.fromList [(InitServer,serverModel, cmd)]))
     , clientStates = Dict.empty
     , resume = FromBackground
     , runInBackground = True }} ! [Cmd.map ServerAppMsg cmd]
@@ -112,10 +120,10 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
     let (newServerModel, newCmds) = case serverMsg of
       ServerAppMsg serverAppMsg -> case serverModel.debugger.appState of
         Running state -> let (newAppModel, cmd) = updateServer serverAppMsg state.appModel
-          in  { serverModel | debugger = { debugger | appState = Running (RunningState newAppModel (Array.push ((ServerMsgEvent serverAppMsg), newAppModel) state.events)) }} ! [Cmd.map ServerAppMsg cmd]
+          in  { serverModel | debugger = { debugger | appState = Running (RunningState newAppModel (Array.push ((ServerMsgEvent serverAppMsg), newAppModel, cmd) state.events)) }} ! [Cmd.map ServerAppMsg cmd]
         Paused state -> case serverModel.debugger.runInBackground of
           True -> let (newAppModel, cmd) = updateServer serverAppMsg state.background.appModel
-            in { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push ((ServerMsgEvent serverAppMsg), newAppModel) state.background.events) }}} ! [Cmd.map ServerAppMsg cmd]
+            in { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push ((ServerMsgEvent serverAppMsg), newAppModel, cmd) state.background.events) }}} ! [Cmd.map ServerAppMsg cmd]
           _ -> serverModel ! []
       OnSocketOpen socket -> { serverModel | socket = Just socket } ! []
       OnClientConnect cid -> serverModel ! [initializeClient serverModel cid]
@@ -166,7 +174,7 @@ type RemoteServerMsg remoteServerMsg model msg =
   PauseDebugger | ResumeDebugger | GoBackDebugger Int |
   ToggleRunInBackgroundDebugger Bool | SetDebuggerResumeStrategy ResumeStrategy |
 
-  SetClientDebuggerModel ClientId (ClientDebuggerModel model msg)
+  SetClientDebuggerModel ClientId (ClientDebuggerModel model msg remoteServerMsg)
 
 wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg model msg -> RPC (ServerModel serverModel serverMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) (ServerMsg serverMsg))
 wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
@@ -183,7 +191,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
       Running state ->
         let debugger = serverModel.debugger in
           let newServerModel = { serverModel | debugger = { debugger | resume = if debugger.runInBackground then debugger.resume else FromPaused,
-                                                                       appState = Paused (PausedState state.appModel state.events ((Array.length state.events) - 1) (RunningState state.appModel Array.empty)) }} in
+                                                                       appState = Paused (PausedState state.appModel Cmd.none state.events ((Array.length state.events) - 1) (RunningState state.appModel Array.empty)) }} in
             (newServerModel, Task.succeed (), Cmd.batch [broadcastPauseAction serverModel.socket, sendDebuggerModel newServerModel])
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
@@ -191,11 +199,12 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
     (\serverModel -> case serverModel.debugger.appState of
       Paused state ->
         let debugger = serverModel.debugger in
-          let newServerModel = case serverModel.debugger.resume of
-            FromPrevious -> { serverModel | debugger = { debugger | appState = Running (RunningState state.pausedModel (getPreviousEvents state.previousIndex state.pausedEvents)) }}
-            FromPaused -> { serverModel | debugger = { debugger | appState = Running (RunningState (getPreviousAppModel state.pausedModel ((Array.length state.pausedEvents) - 1) state.pausedEvents) state.pausedEvents) }}
-            FromBackground -> { serverModel | debugger = { debugger | appState = Running (RunningState state.background.appModel (Array.append state.pausedEvents state.background.events)) }} in
-           (newServerModel, Task.succeed (), Cmd.batch [broadcastResumeAction serverModel.socket, sendDebuggerModel newServerModel])
+          let (newServerModel, newServerCmd) = case serverModel.debugger.resume of
+            FromPrevious -> { serverModel | debugger = { debugger | appState = Running (RunningState state.pausedModel (getPreviousEvents state.previousIndex state.pausedEvents)) }} ! [Cmd.map ServerAppMsg state.pausedCmd]
+            FromPaused -> let (previousAppModel, previousCmd) = (getPreviousAppModel state.pausedModel Cmd.none ((Array.length state.pausedEvents) - 1) state.pausedEvents)
+              in { serverModel | debugger = { debugger | appState = Running (RunningState previousAppModel state.pausedEvents) }} ! [Cmd.map ServerAppMsg previousCmd]
+            FromBackground -> { serverModel | debugger = { debugger | appState = Running (RunningState state.background.appModel (Array.append state.pausedEvents state.background.events)) }} ! [] in
+           (newServerModel, Task.succeed (), Cmd.batch [newServerCmd, broadcastResumeAction serverModel.socket, sendDebuggerModel newServerModel])
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
   ToggleRunInBackgroundDebugger runInBackground ->
@@ -206,10 +215,12 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
   GoBackDebugger index -> rpc Handle
     (\serverModel -> let debugger = serverModel.debugger in case serverModel.debugger.appState of
       Running state ->
-        let newServerModel = { serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.events) state.events index (RunningState state.appModel Array.empty))  }} in
-          (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
+        let (previousAppModel, previousCmd) = (getPreviousAppModel state.appModel Cmd.none index state.events) in
+          let newServerModel = { serverModel | debugger = { debugger | appState = Paused (PausedState previousAppModel previousCmd state.events index (RunningState state.appModel Array.empty))  }} in
+            (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
       Paused state ->
-        let newServerModel = { serverModel | debugger = { debugger | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedEvents) state.pausedEvents index state.background) }} in
+        let (previousAppModel, previousCmd) = (getPreviousAppModel state.pausedModel Cmd.none index state.pausedEvents) in
+        let newServerModel = { serverModel | debugger = { debugger | appState = Paused (PausedState previousAppModel previousCmd state.pausedEvents index state.background) }} in
           (newServerModel, Task.succeed (), sendDebuggerModel newServerModel))
 
 
@@ -219,11 +230,11 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
         let debugger = serverModel.debugger in
           case serverModel.debugger.appState of
             Running state ->
-              let newServerModel = { serverModel | debugger = { debugger | appState = Running (RunningState appModel (Array.push (RPCevent msg, appModel) state.events))}} in
+              let newServerModel = { serverModel | debugger = { debugger | appState = Running (RunningState appModel (Array.push (RPCevent msg, appModel, Cmd.none) state.events))}} in
                 newServerModel ! [sendDebuggerModel newServerModel]
             Paused state ->
               let background = state.background in
-                let newServerModel = { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState appModel (Array.push (RPCevent msg, appModel) state.background.events) }}} in
+                let newServerModel = { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState appModel (Array.push (RPCevent msg, appModel, Cmd.none) state.background.events) }}} in
                   newServerModel ! [sendDebuggerModel newServerModel])
           (\serverModel -> case serverModel.debugger.appState of
             Running state -> state.appModel
@@ -239,11 +250,11 @@ wrapServerState serverState = \serverModel ->
   let wrapState = \appModel newAppState ->
     let (appServerState, newAppModel, newCmd) = serverState appModel in
       let debugger = serverModel.debugger in
-        let (wrappedServerModel, wrappedCmd) = { serverModel | debugger = { debugger | appState = newAppState newAppModel }} ! [Cmd.map ServerAppMsg newCmd] in
+        let (wrappedServerModel, wrappedCmd) = { serverModel | debugger = { debugger | appState = newAppState newAppModel newCmd }} ! [Cmd.map ServerAppMsg newCmd] in
           (ServerState appServerState, wrappedServerModel, Cmd.batch [wrappedCmd]) in
   case serverModel.debugger.appState of
-    Running state -> wrapState state.appModel (\newAppModel -> (Running (RunningState newAppModel (Array.push (StateEvent, newAppModel) state.events))))
-    Paused state -> wrapState state.background.appModel (\newAppModel -> (Paused { state | background = RunningState newAppModel (Array.push (StateEvent, newAppModel) state.background.events) }))
+    Running state -> wrapState state.appModel (\newAppModel newCmd -> (Running (RunningState newAppModel (Array.push (StateEvent, newAppModel, newCmd) state.events))))
+    Paused state -> wrapState state.background.appModel (\newAppModel newCmd -> (Paused { state | background = RunningState newAppModel (Array.push (StateEvent, newAppModel, newCmd) state.background.events) }))
 
 -- SERVER-SUBSCRIPTIONS
 
@@ -259,12 +270,12 @@ wrapServerSubscriptions serverSubscriptions =
 
 type Model model msg serverModel serverMsg remoteServerMsg =
   Uninitialized (model, MultitierCmd remoteServerMsg msg) |
-  ClientDebugger ClientId (ClientDebuggerModel model msg) |
-  Switching ClientId (ClientDebuggerModel model msg) |
-  ServerDebugger ClientId (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg) (ClientDebuggerModel model msg)
+  ClientDebugger ClientId (ClientDebuggerModel model msg remoteServerMsg) |
+  Switching ClientId (ClientDebuggerModel model msg remoteServerMsg) |
+  ServerDebugger ClientId (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg) (ClientDebuggerModel model msg remoteServerMsg)
 
-type alias ClientDebuggerModel appModel appMsg  =
-  { appState : AppState appModel (ClientEvent appMsg)
+type alias ClientDebuggerModel appModel appMsg remoteServerMsg =
+  { appState : AppState (ClientEvent appMsg) appModel (MultitierCmd remoteServerMsg appMsg)
   , runInBackground : Bool }
 
 type ClientEvent appMsg = Init | MsgEvent appMsg
@@ -305,8 +316,8 @@ wrapUpdate update = \msg model -> case model of
     OnSocketMsg data -> case (fromJSONString data) of
       InitializeClient initData ->
         let newAppState = case initData.paused of
-          False -> Running (RunningState appModel (Array.fromList [(Init, appModel)]))
-          True -> Paused (PausedState appModel (Array.fromList [(Init, appModel)]) 0 (RunningState appModel Array.empty)) in
+          False -> Running (RunningState appModel (Array.fromList [(Init, appModel, cmd)]))
+          True -> Paused (PausedState appModel cmd (Array.fromList [(Init, appModel, cmd)]) 0 (RunningState appModel Array.empty)) in
          let newcmodel = ClientDebuggerModel newAppState initData.runInBackground in
             ClientDebugger initData.cid newcmodel !! [Multitier.map RemoteServerAppMsg AppMsg cmd, performOnServer (SetClientDebuggerModel initData.cid newcmodel)]
       _ -> model !! []
@@ -377,27 +388,27 @@ wrapUpdate update = \msg model -> case model of
       _ -> ClientDebugger cid cmodel !! []
     _ -> model !! []
 
-pauseClient : ClientId -> ClientDebuggerModel model msg -> (ClientDebuggerModel model msg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
+pauseClient : ClientId -> ClientDebuggerModel model msg remoteServerMsg -> (ClientDebuggerModel model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
 pauseClient cid cmodel = case cmodel.appState of
-  Running state -> let newcmodel = { cmodel | appState = Paused (PausedState state.appModel state.events ((Array.length state.events) - 1) (RunningState state.appModel Array.empty)) } in
+  Running state -> let newcmodel = { cmodel | appState = Paused (PausedState state.appModel Multitier.none state.events ((Array.length state.events) - 1) (RunningState state.appModel Array.empty)) } in
     newcmodel !! [performOnServer (SetClientDebuggerModel cid newcmodel)]
   _ -> cmodel !! []
 
-resumeClient : ClientId -> ClientDebuggerModel model msg -> (ClientDebuggerModel model msg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
+resumeClient : ClientId -> ClientDebuggerModel model msg remoteServerMsg -> (ClientDebuggerModel model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
 resumeClient cid cmodel = case cmodel.appState of
   Paused state -> let newcmodel = { cmodel | appState = Running (RunningState state.background.appModel (Array.append state.pausedEvents state.background.events)) } in
     newcmodel !! [performOnServer (SetClientDebuggerModel cid newcmodel)]
   _ -> cmodel !! []
 
 
-updateAppModel : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> msg -> ClientId -> ClientDebuggerModel model msg -> (ClientDebuggerModel model msg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
+updateAppModel : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> msg -> ClientId -> ClientDebuggerModel model msg remoteServerMsg -> (ClientDebuggerModel model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
 updateAppModel update appMsg cid cmodel = let (newcmodel, cmd) =
   case cmodel.appState of
     Running state -> let (newAppModel, cmd) = update appMsg state.appModel
-      in  { cmodel | appState = Running (RunningState newAppModel (Array.push ((MsgEvent appMsg), newAppModel) state.events))} !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
+      in  { cmodel | appState = Running (RunningState newAppModel (Array.push ((MsgEvent appMsg), newAppModel, cmd) state.events))} !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
     Paused state -> if cmodel.runInBackground
       then let (newAppModel, cmd) = update appMsg state.background.appModel in
-        { cmodel | appState = Paused { state | background = RunningState newAppModel (Array.push ((MsgEvent appMsg), newAppModel) state.background.events) }} !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
+        { cmodel | appState = Paused { state | background = RunningState newAppModel (Array.push ((MsgEvent appMsg), newAppModel, cmd) state.background.events) }} !! [Multitier.map RemoteServerAppMsg AppMsg cmd]
       else cmodel !! [] in
     (newcmodel, Multitier.batch [cmd, performOnServer (SetClientDebuggerModel cid newcmodel)])
 
@@ -467,13 +478,13 @@ wrapView appView = \model -> case model of
         Paused state ->
           view state.pausedModel state.pausedEvents state.previousIndex (ActionProps Resume "Resume" True False)
 
-timelineView : serverModel -> Array ((ServerEvent serverMsg remoteServerMsg), serverModel) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
+timelineView : serverModel -> EventStream (ServerEvent serverMsg remoteServerMsg) serverModel (Cmd serverMsg) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 timelineView appModel events previousIndex =
   let offset = 10
       eventSpacing = 25
       circles = events
     |> Array.indexedMap (,)
-    |> Array.map (\(index, (msg, model)) ->
+    |> Array.map (\(index, (msg, model, cmd)) ->
       Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] [])
     |> Array.toList
   in
@@ -483,7 +494,7 @@ timelineView appModel events previousIndex =
         [Svg.line [x1 (toString offset), y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []],
         circles ])]
 
-clientEventsView : Dict String (ClientId, ClientDebuggerModel model msg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
+clientEventsView : Dict String (ClientId, ClientDebuggerModel model msg remoteServerMsg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 clientEventsView clientStates =
   clientStates
     |> Dict.toList
@@ -493,22 +504,22 @@ clientEventsView clientStates =
       in Html.div [] [Html.text (toString appModel)] )
     |> Html.div []
 
-serverEventsView : serverModel -> Array ((ServerEvent serverMsg remoteServerMsg), serverModel) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
+serverEventsView : serverModel -> EventStream (ServerEvent serverMsg remoteServerMsg) serverModel (Cmd serverMsg) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 serverEventsView appModel events previousIndex =
   let options = events
     |> Array.indexedMap (,)
-    |> Array.map (\(index, (msg, model)) -> Html.option [onClick (GoBack index), selected (previousIndex == index)] [Html.text (serverEventView msg)])
+    |> Array.map (\(index, (msg, model, cmd)) -> Html.option [onClick (GoBack index), selected (previousIndex == index)] [Html.text (serverEventView msg)])
     |> Array.toList
     |> List.reverse
   in Html.div [] [
     Html.select [size 15] options,
     Html.pre [] [Html.text (toString appModel)]]
 
-eventsView : model -> Array ((ClientEvent msg), model) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
+eventsView : model -> EventStream (ClientEvent msg) model (MultitierCmd remoteServerMsg msg) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 eventsView appModel events previousIndex =
   let options = events
     |> Array.indexedMap (,)
-    |> Array.map (\(index, (msg, model)) -> Html.option [selected (previousIndex == index)] [Html.text (clientEventView msg)])
+    |> Array.map (\(index, (msg, model, cmd)) -> Html.option [selected (previousIndex == index)] [Html.text (clientEventView msg)])
     |> Array.toList
     |> List.reverse
   in Html.div [] [
