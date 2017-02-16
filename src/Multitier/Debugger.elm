@@ -449,12 +449,12 @@ wrapView appView = \model -> case model of
         Running state ->
           view state.appModel state.events ((Array.length state.events) - 1) []
         Paused state ->
-          view state.pausedModel state.pausedEvents state.previousIndex [disabled True, onClick Resume, style [("opacity", "0.25")]]
+          view state.pausedModel state.pausedEvents state.previousIndex [disabled True, style [("opacity", "0.25")]]
 
   Switching cid smodel -> Html.text "Switching to server debugger..."
 
   ServerDebugger cid smodel _ ->
-    let view appModel events previousIndex divAtt actionProps =
+    let view appModel events previousIndex actionProps =
       Html.div [] [
         Html.button [onClick SwitchDebugger] [Html.text "Switch back to client"],
         serverActions smodel actionProps,
@@ -463,9 +463,9 @@ wrapView appView = \model -> case model of
         timelineView appModel events previousIndex]
       in case smodel.appState of
         Running state ->
-          view state.appModel state.events ((Array.length state.events) - 1) [] (ActionProps Pause "Pause" False True)
+          view state.appModel state.events ((Array.length state.events) - 1) (ActionProps Pause "Pause" False True)
         Paused state ->
-          view state.pausedModel state.pausedEvents state.previousIndex [disabled True, onClick Resume, style [("opacity", "0.25")]] (ActionProps Resume "Resume" True False)
+          view state.pausedModel state.pausedEvents state.previousIndex (ActionProps Resume "Resume" True False)
 
 timelineView : serverModel -> Array ((ServerEvent serverMsg remoteServerMsg), serverModel) -> Int -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 timelineView appModel events previousIndex =
