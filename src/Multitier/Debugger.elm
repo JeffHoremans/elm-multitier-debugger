@@ -102,7 +102,7 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
           in { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push ((ServerMsgEvent serverAppMsg), newAppModel) state.background.events) }}} ! [Cmd.map ServerAppMsg cmd]
 
       OnSocketOpen socket -> { serverModel | socket = Just socket } ! []
-      OnClientConnect cid -> serverModel ! [sendClientId serverModel.socket cid]
+      OnClientConnect cid -> serverModel ! [initializeClient serverModel cid]
       OnClientDisconnect cid -> {serverModel | clients = Dict.remove (toString cid) serverModel.clients } ! []
 
       Nothing -> serverModel ! []
@@ -113,8 +113,12 @@ sendDebuggerModel serverModel = serverModel.clients
   |> Dict.values
   |> multicastSocketMsg serverModel.socket (SetServerModel serverModel.debugger)
 
-sendClientId : Maybe WebSocket -> ClientId -> Cmd (ServerMsg serverMsg)
-sendClientId socket cid = sendSocketMsg socket cid (SetClientId cid)
+initializeClient : ServerModel serverModel serverMsg remoteServerMsg model msg -> ClientId -> Cmd (ServerMsg serverMsg)
+initializeClient serverModel cid =
+  let paused = case serverModel.debugger.appState of
+    Running _ -> False
+    _ -> True in
+    sendSocketMsg serverModel.socket cid (InitializeClient cid paused)
 
 sendSocketMsg : Maybe WebSocket -> ClientId -> SocketMsg serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
 sendSocketMsg maybeSocket cid msg = case maybeSocket of
@@ -204,20 +208,31 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
 
 -- SERVER-STATE
 
-type alias ServerState serverState = { appState: serverState }
+type alias ServerState serverState = { appServerState: serverState }
 
 wrapServerState : (serverModel -> (serverState, serverModel, Cmd serverMsg)) -> (ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerState serverState, ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg)))
 wrapServerState serverState = \serverModel ->
-  let (appState, newAppModel, newCmd) = case serverModel.debugger.appState of
-    Running state -> serverState state.appModel
-    Paused state -> serverState state.background.appModel in
-  let debugger = serverModel.debugger in
-    let (newWrappedServerModel, newWrappedCmd) = case serverModel.debugger.appState of
-      Running state ->
-        { serverModel | debugger = { debugger | appState = Running (RunningState newAppModel (Array.push (StateEvent, newAppModel) state.events)) }} ! [Cmd.map ServerAppMsg newCmd]
-      Paused state ->
-        { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push (StateEvent, newAppModel) state.background.events) }}} ! [Cmd.map ServerAppMsg newCmd]
-    in (ServerState appState, newWrappedServerModel, Cmd.batch [newWrappedCmd])
+  let wrapState = \appModel newAppState ->
+    let (appServerState, newAppModel, newCmd) = serverState appModel in
+      let debugger = serverModel.debugger in
+        let (wrappedServerModel, wrappedCmd) = { serverModel | debugger = { debugger | appState = newAppState newAppModel }} ! [Cmd.map ServerAppMsg newCmd] in
+          (ServerState appServerState, wrappedServerModel, Cmd.batch [wrappedCmd]) in
+  case serverModel.debugger.appState of
+    Running state -> wrapState state.appModel (\newAppModel -> (Running (RunningState newAppModel (Array.push (StateEvent, newAppModel) state.events))))
+    Paused state -> wrapState state.background.appModel (\newAppModel -> (Paused { state | background = RunningState newAppModel (Array.push (StateEvent, newAppModel) state.background.events) }))
+
+  -- let (appServerState, newAppModel, newCmd) = case serverModel.debugger.appState of
+  --   Running state -> serverState state.appModel
+  --   Paused state -> serverState state.background.appModel in
+  -- let debugger = serverModel.debugger in
+  --   let (newWrappedServerModel, newWrappedCmd) = case serverModel.debugger.appState of
+  --     Running state ->
+  --       { serverModel | debugger = { debugger | appState = Running (RunningState newAppModel (Array.push (StateEvent, newAppModel) state.events)) }} ! [Cmd.map ServerAppMsg newCmd]
+  --     Paused state ->
+  --       { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push (StateEvent, newAppModel) state.background.events) }}} ! [Cmd.map ServerAppMsg newCmd]
+  --   in (ServerState True appServerState, newWrappedServerModel, Cmd.batch [newWrappedCmd])
+
+
 
 -- SERVER-SUBSCRIPTIONS
 
@@ -246,7 +261,7 @@ type alias ClientDebuggerModel appModel appMsg  =
 type ClientEvent appMsg = Init | MsgEvent appMsg
 
 wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (ServerState serverState -> (Model model msg serverModel serverMsg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg)))
-wrapInit init = \serverState -> Uninitialized (init serverState.appState) !! []
+wrapInit init = \serverState -> Uninitialized (init serverState.appServerState) !! []
 
 type Msg model msg serverModel serverMsg remoteServerMsg =
   AppMsg msg |
@@ -262,7 +277,7 @@ type Msg model msg serverModel serverMsg remoteServerMsg =
   HandleStartDebugView (Result Error (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg)) | HandleStopDebugView (Result Error ())
 
 type SocketMsg serverModel serverMsg remoteServerMsg model msg =
-  SetClientId ClientId |
+  InitializeClient ClientId Bool |
   SetServerModel (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg) |
 
   PauseClient | ResumeClient
@@ -274,8 +289,11 @@ wrapUpdate update = \msg model -> case model of
 
   Uninitialized (appModel, cmd) -> case msg of
     OnSocketMsg data -> case (fromJSONString data) of
-      SetClientId clientId -> let newcmodel = (ClientDebuggerModel (Running (RunningState appModel (Array.fromList [(Init, appModel)]))) --True FromBackground
-                                                                                                                                        ) in
+      InitializeClient clientId paused ->
+        let newcmodel = case paused of
+          False -> (ClientDebuggerModel (Running (RunningState appModel (Array.fromList [(Init, appModel)]))) --True FromBackground
+                                                                                                                                        )
+          True -> (ClientDebuggerModel (Paused (PausedState appModel (Array.fromList [(Init, appModel)]) 0 (RunningState appModel (Array.fromList [(Init, appModel)]))))) in
         ClientDebugger clientId newcmodel !! [Multitier.map RemoteServerAppMsg AppMsg cmd, performOnServer (SetClientDebuggerModel clientId newcmodel)]
       _ -> model !! []
     _ -> model !! []
