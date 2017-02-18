@@ -19,7 +19,7 @@ import WebSocket
 import Multitier exposing (Config, MultitierCmd, MultitierProgram, (!!), performOnServer, performOnClient)
 import Multitier.RPC as RPC exposing (RPC, rpc)
 import Multitier.Error exposing (Error)
-import Multitier.Server.WebSocket as ServerWebSocket exposing (WebSocket, ClientId)
+import Multitier.Server.WebSocket as ServerWebSocket exposing (ClientId)
 import Multitier.LowLevel exposing (toJSON, fromJSONString)
 
 type ResumeStrategy = FromPrevious | FromPaused | FromBackground
@@ -83,8 +83,7 @@ program stuff = Multitier.program
 -- SERVER-MODEL
 
 type alias ServerModel serverModel serverMsg remoteServerMsg model msg =
-  { socket: Maybe WebSocket
-  , clients: Dict String ClientId
+  { clients: Dict String ClientId
   , debugger: ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg }
 
 type alias ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg =
@@ -95,10 +94,12 @@ type alias ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg =
 
 type ServerEvent serverMsg remoteServerMsg = InitServer | ServerMsgEvent serverMsg | StateEvent | RPCevent remoteServerMsg
 
+socketPath : String
+socketPath = "debug"
+
 wrapInitServer : ((serverModel, Cmd serverMsg)) -> (((ServerModel serverModel serverMsg remoteServerMsg model msg), Cmd (ServerMsg serverMsg)))
 wrapInitServer (serverModel, cmd) =
-  { socket = Maybe.Nothing
-  , clients = Dict.empty
+  { clients = Dict.empty
   , debugger =
     { appState = Running (RunningState serverModel (Array.fromList [(InitServer,serverModel, cmd)]))
     , clientStates = Dict.empty
@@ -106,7 +107,7 @@ wrapInitServer (serverModel, cmd) =
     , runInBackground = True }} ! [Cmd.map ServerAppMsg cmd]
 
 type ServerMsg serverMsg = ServerAppMsg serverMsg |
-                           OnSocketOpen WebSocket | OnClientConnect ClientId | OnClientDisconnect ClientId |
+                           OnClientConnect ClientId | OnClientDisconnect ClientId |
                            Nothing
 
 wrapUpdateServer : (serverMsg -> serverModel -> (serverModel, Cmd serverMsg)) -> (ServerMsg serverMsg -> ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg)))
@@ -120,7 +121,6 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
           True -> let (newAppModel, cmd) = updateServer serverAppMsg state.background.appModel
             in { serverModel | debugger = { debugger | appState = Paused { state | background = RunningState newAppModel (Array.push ((ServerMsgEvent serverAppMsg), newAppModel, cmd) state.background.events) }}} ! [Cmd.map ServerAppMsg cmd]
           _ -> serverModel ! []
-      OnSocketOpen socket -> { serverModel | socket = Just socket } ! []
       OnClientConnect cid -> serverModel ! [initializeClient serverModel cid]
       OnClientDisconnect cid -> {serverModel | clients = Dict.remove (toString cid) serverModel.clients } ! []
 
@@ -130,38 +130,32 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
 sendDebuggerModel : ServerModel serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
 sendDebuggerModel serverModel = serverModel.clients
   |> Dict.values
-  |> multicastSocketMsg serverModel.socket (SetServerModel serverModel.debugger)
+  |> multicastSocketMsg (SetServerModel serverModel.debugger)
 
 initializeClient : ServerModel serverModel serverMsg remoteServerMsg model msg -> ClientId -> Cmd (ServerMsg serverMsg)
 initializeClient serverModel cid =
   let paused = case serverModel.debugger.appState of
     Running _ -> False
     _ -> True in
-    sendSocketMsg serverModel.socket cid (InitializeClient { cid= cid, paused= paused, runInBackground= serverModel.debugger.runInBackground })
+    sendSocketMsg cid (InitializeClient { cid= cid, paused= paused, runInBackground= serverModel.debugger.runInBackground })
 
-sendSocketMsg : Maybe WebSocket -> ClientId -> SocketMsg serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
-sendSocketMsg maybeSocket cid msg = case maybeSocket of
-  Just socket -> ServerWebSocket.send socket cid (Encode.encode 0 (toJSON msg))
-  _ -> Cmd.none
+sendSocketMsg : ClientId -> SocketMsg serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
+sendSocketMsg cid msg = ServerWebSocket.send socketPath cid (Encode.encode 0 (toJSON msg))
 
-broadcastPauseAction : Maybe WebSocket -> Cmd (ServerMsg serverMsg)
-broadcastPauseAction socket = broadcastSocketMsg socket (PauseClient)
+broadcastPauseAction : Cmd (ServerMsg serverMsg)
+broadcastPauseAction = broadcastSocketMsg (PauseClient)
 
-broadcastResumeAction : Maybe WebSocket -> Cmd (ServerMsg serverMsg)
-broadcastResumeAction socket = broadcastSocketMsg socket (ResumeClient)
+broadcastResumeAction : Cmd (ServerMsg serverMsg)
+broadcastResumeAction = broadcastSocketMsg (ResumeClient)
 
-broadcastGoBackAction : Maybe WebSocket -> Cmd (ServerMsg serverMsg)
-broadcastGoBackAction socket = broadcastSocketMsg socket (GoBackClient)
+broadcastGoBackAction : Cmd (ServerMsg serverMsg)
+broadcastGoBackAction = broadcastSocketMsg (GoBackClient)
 
-broadcastSocketMsg : Maybe WebSocket -> SocketMsg serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
-broadcastSocketMsg maybeSocket msg = case maybeSocket of
-  Just socket -> ServerWebSocket.broadcast socket (Encode.encode 0 (toJSON msg))
-  _ -> Cmd.none
+broadcastSocketMsg : SocketMsg serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
+broadcastSocketMsg msg = ServerWebSocket.broadcast socketPath (Encode.encode 0 (toJSON msg))
 
-multicastSocketMsg : Maybe WebSocket -> SocketMsg serverModel serverMsg remoteServerMsg model msg -> List ClientId -> Cmd (ServerMsg serverMsg)
-multicastSocketMsg maybeSocket msg ids = case maybeSocket of
-  Just socket -> ServerWebSocket.multicast socket ids (Encode.encode 0 (toJSON msg))
-  _ -> Cmd.none
+multicastSocketMsg : SocketMsg serverModel serverMsg remoteServerMsg model msg -> List ClientId -> Cmd (ServerMsg serverMsg)
+multicastSocketMsg msg ids = ServerWebSocket.multicast socketPath ids (Encode.encode 0 (toJSON msg))
 
 -- PROCEDURE
 
@@ -190,7 +184,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
         let debugger = serverModel.debugger in
           let newServerModel = { serverModel | debugger = { debugger | resume = if debugger.runInBackground then debugger.resume else FromPaused,
                                                                        appState = Paused (PausedState state.appModel Cmd.none state.events ((Array.length state.events) - 1) (RunningState state.appModel Array.empty)) }} in
-            (newServerModel, Task.succeed (), Cmd.batch [broadcastPauseAction serverModel.socket, sendDebuggerModel newServerModel])
+            (newServerModel, Task.succeed (), Cmd.batch [broadcastPauseAction, sendDebuggerModel newServerModel])
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
   ResumeDebugger -> rpc Handle
@@ -202,7 +196,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
             FromPaused -> let (previousAppModel, previousCmd) = (getPreviousAppModel state.pausedModel Cmd.none ((Array.length state.pausedEvents) - 1) state.pausedEvents)
               in { serverModel | debugger = { debugger | appState = Running (RunningState previousAppModel state.pausedEvents) }} ! [Cmd.map ServerAppMsg previousCmd]
             FromBackground -> { serverModel | debugger = { debugger | appState = Running (RunningState state.background.appModel (Array.append state.pausedEvents state.background.events)) }} ! [] in
-           (newServerModel, Task.succeed (), Cmd.batch [newServerCmd, broadcastResumeAction serverModel.socket, sendDebuggerModel newServerModel])
+           (newServerModel, Task.succeed (), Cmd.batch [newServerCmd, broadcastResumeAction, sendDebuggerModel newServerModel])
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
   ToggleRunInBackgroundDebugger runInBackground ->
@@ -215,11 +209,11 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
       Running state ->
         let (previousAppModel, previousCmd) = (getPreviousAppModel state.appModel Cmd.none index state.events) in
           let newServerModel = { serverModel | debugger = { debugger | appState = Paused (PausedState previousAppModel previousCmd state.events index (RunningState state.appModel Array.empty))  }} in
-            (newServerModel, Task.succeed (), Cmd.batch [broadcastPauseAction serverModel.socket, sendDebuggerModel newServerModel])
+            (newServerModel, Task.succeed (), Cmd.batch [broadcastPauseAction, sendDebuggerModel newServerModel])
       Paused state ->
         let (previousAppModel, previousCmd) = (getPreviousAppModel state.pausedModel Cmd.none index state.pausedEvents) in
         let newServerModel = { serverModel | debugger = { debugger | appState = Paused (PausedState previousAppModel previousCmd state.pausedEvents index state.background) }} in
-          (newServerModel, Task.succeed (), Cmd.batch [broadcastPauseAction serverModel.socket, sendDebuggerModel newServerModel]))
+          (newServerModel, Task.succeed (), Cmd.batch [broadcastPauseAction, sendDebuggerModel newServerModel]))
 
 
   RemoteServerAppMsg msg ->
@@ -262,7 +256,7 @@ wrapServerSubscriptions serverSubscriptions =
     let appSubs = case serverModel.debugger.appState of
       Running state -> Sub.map ServerAppMsg (serverSubscriptions state.appModel)
       Paused state -> if serverModel.debugger.runInBackground then Sub.map ServerAppMsg (serverSubscriptions state.background.appModel) else Sub.none
-    in Sub.batch [appSubs, ServerWebSocket.listen "debugger" OnSocketOpen OnClientConnect OnClientDisconnect (always Nothing)]
+    in Sub.batch [appSubs, ServerWebSocket.keepAliveAndMonitor "debugger" OnClientConnect OnClientDisconnect]
 
 -- MODEL
 
