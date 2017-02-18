@@ -423,7 +423,7 @@ wrapSubscriptions subscriptions = \model ->
     ClientDebugger cid cmodel -> appSubs cmodel
     Switching cid cmodel -> appSubs cmodel
     ServerDebugger cid smodel cmodel -> appSubs cmodel
-  in Sub.batch [subs, WebSocket.listen "ws://localhost:8081/debugger" OnSocketMsg]
+  in Sub.batch [subs, WebSocket.listen ("ws://localhost:8081/" ++ socketPath ) OnSocketMsg]
 
 -- VIEW
 
