@@ -256,7 +256,7 @@ wrapServerSubscriptions serverSubscriptions =
     let appSubs = case serverModel.debugger.appState of
       Running state -> Sub.map ServerAppMsg (serverSubscriptions state.appModel)
       Paused state -> if serverModel.debugger.runInBackground then Sub.map ServerAppMsg (serverSubscriptions state.background.appModel) else Sub.none
-    in Sub.batch [appSubs, ServerWebSocket.keepAliveAndMonitor "debugger" OnClientConnect OnClientDisconnect]
+    in Sub.batch [appSubs, ServerWebSocket.keepAliveAndMonitor socketPath OnClientConnect OnClientDisconnect]
 
 -- MODEL
 
