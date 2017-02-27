@@ -21,6 +21,7 @@ import Multitier.RPC as RPC exposing (RPC, rpc)
 import Multitier.Error exposing (Error)
 import Multitier.Server.WebSocket as ServerWebSocket exposing (ClientId)
 import Multitier.LowLevel exposing (toJSON, fromJSONString)
+import Multitier.Server.Console as Console
 
 import Multitier.Debugger.EventStream as EventStream exposing (EventStream, Event(..))
 
@@ -390,7 +391,7 @@ updateAppModel update appMsg cid cmodel =
   case cmodel.state of
     Running ->
       let (newAppModel, newCmd) = update appMsg cmodel.appModel in
-        { cmodel | appModel = newAppModel } !! [Multitier.map RemoteServerAppMsg AppMsg newCmd, performOnServer (AddClientEvent cid (MsgEvent appMsg) newAppModel newCmd)]
+        { cmodel | appModel = newAppModel } !! [Multitier.map RemoteServerAppMsg AppMsg newCmd, performOnServer (AddClientEvent cid (MsgEvent appMsg) newAppModel newCmd), performOnClient (Console.log "Adding client event...")]
     Paused -> cmodel !! []
 
 -- SUBSCRIPTIONS
