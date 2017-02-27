@@ -181,7 +181,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
   AddClientEvent cid event model cmd -> rpc Handle
     (\serverModel -> let debugger = serverModel.debugger in
       case debugger.state of
-        Running -> ({ serverModel | debugger = { debugger | events = EventStream.pushClientEvent cid (event,model,cmd) debugger.events }}, Task.succeed (), Console.log "Pushing client event...")
+        Running -> ({ serverModel | debugger = { debugger | events = EventStream.pushClientEvent cid (event,model,cmd) debugger.events }}, Task.succeed (), Console.log (toString (EventStream.pushClientEvent cid (event,model,cmd) debugger.events)))
         Paused -> (serverModel, Task.succeed (), Cmd.none)) -- TODO what to do in this case?
 
   PauseDebugger -> rpc Handle
