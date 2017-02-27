@@ -489,6 +489,7 @@ timelineView smodel =
     Svg.svg [ width (toString ((((EventStream.length smodel.events) - 1) * eventSpacing) + (offset * 2))), height (toString (40 * ((EventStream.numberOfClients smodel.events) + 1)))]
       (List.concat [
         [Svg.line [x1 (toString offset), y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []],
+        lines,
         circles ])]
 
 eventsView : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
