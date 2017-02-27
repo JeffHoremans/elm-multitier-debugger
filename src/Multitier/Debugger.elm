@@ -439,9 +439,13 @@ wrapView appView = \model -> case model of
     let view state divAtt =
       Html.div [] [
         Html.div divAtt [
-          Html.map AppMsg (appView state.appModel)],
+          Html.map AppMsg (appView state.appModel)], -- TODO if previous then previousModel
         Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
           Html.button [onClick SwitchDebugger] [Html.text "Switch to server debugger"],
+          Html.pre [] [
+            Html.text (toString (case state.previous of
+              Just previous -> previous.appModel
+              _ -> state.appModel))],
           eventsView state]]
       in case cmodel.appState of
         Running state ->
@@ -456,6 +460,10 @@ wrapView appView = \model -> case model of
       Html.div [] [
         Html.button [onClick SwitchDebugger] [Html.text "Switch back to client"],
         serverActions smodel actionProps,
+        Html.pre [] [
+          Html.text (toString (case state.previous of
+            Just previous -> previous.appModel
+            _ -> state.appModel))],
         serverEventsView state,
         clientEventsView smodel.clientStates,
         timelineView state]
@@ -507,8 +515,7 @@ serverEventsView state =
       |> Array.toList
       |> List.reverse
   in Html.div [] [
-    Html.select [size 15] options,
-    Html.pre [] [Html.text (toString state.appModel)]]
+    Html.select [size 15] options]
 
 eventsView : State (ClientEvent msg) model (MultitierCmd remoteServerMsg msg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 eventsView state =
@@ -522,8 +529,7 @@ eventsView state =
       |> Array.toList
       |> List.reverse
   in Html.div [] [
-    Html.select [size 15] options,
-    Html.pre [] [Html.text (toString state.appModel)]]
+    Html.select [size 15] options]
 
 type alias ActionProps msg =
   { btnAction: msg
