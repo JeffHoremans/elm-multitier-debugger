@@ -181,7 +181,9 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
   AddClientEvent cid event model cmd -> rpc Handle
     (\serverModel -> let debugger = serverModel.debugger in
       case debugger.state of
-        Running -> ({ serverModel | debugger = { debugger | events = EventStream.pushClientEvent cid (event,model,cmd) debugger.events }}, Task.succeed (), Cmd.none)
+        Running ->
+          let newServerModel = { serverModel | debugger = { debugger | events = EventStream.pushClientEvent cid (event,model,cmd) debugger.events }} in
+            (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
         Paused -> (serverModel, Task.succeed (), Cmd.none)) -- TODO what to do in this case?
 
   PauseDebugger -> rpc Handle
@@ -499,8 +501,7 @@ eventsView smodel =
       |> List.map (\(index, event) -> Html.option [onClick (GoBack index), selected (previousIndex == index)] [Html.text (eventView event)])
       |> List.reverse
   in Html.div [] [
-    Html.select [size 15] options,
-    Html.pre [] [Html.text (toString smodel.events)]]
+    Html.select [size 15] options]
 
 type alias ActionProps msg =
   { btnAction: msg
