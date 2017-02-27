@@ -21,7 +21,6 @@ import Multitier.RPC as RPC exposing (RPC, rpc)
 import Multitier.Error exposing (Error)
 import Multitier.Server.WebSocket as ServerWebSocket exposing (ClientId)
 import Multitier.LowLevel exposing (toJSON, fromJSONString)
--- import Multitier.Server.Console as Console
 
 import Multitier.Debugger.EventStream as EventStream exposing (EventStream, Event(..))
 
@@ -479,14 +478,15 @@ timelineView smodel =
     eventSpacing = 25
     circles =
       EventStream.view smodel.events
-        |> List.filter (\(_,event) -> case event of
-          ServerEvent _ -> True
-          _ -> False)
         |> List.map (\(index, event) -> Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] [])
 
+    lines =
+      EventStream.clients smodel.events
+        |> List.indexedMap (,)
+        |> List.map (\(index,cid) -> Svg.line [x1 (toString offset), y1 (toString ((index * 40) + 60)), x2 "100%", y2 (toString ((index * 40) + 60)), style [("stroke", "black"), ("stroke-width", "3")]] [])
   in
   Html.div [id "timeline", style [("overflow-x", "auto")]] [
-    Svg.svg [ width (toString ((((EventStream.length smodel.events) - 1) * eventSpacing) + (offset * 2))), height "40"]
+    Svg.svg [ width (toString ((((EventStream.length smodel.events) - 1) * eventSpacing) + (offset * 2))), height (toString (40 * ((EventStream.numberOfClients smodel.events) + 1)))]
       (List.concat [
         [Svg.line [x1 (toString offset), y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []],
         circles ])]

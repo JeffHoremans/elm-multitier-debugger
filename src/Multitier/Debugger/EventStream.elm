@@ -9,6 +9,8 @@ module Multitier.Debugger.EventStream
     , previousClientState
     , goBack
     , length
+    , clients
+    , numberOfClients
     , view )
 
 import Array exposing (Array)
@@ -69,6 +71,12 @@ goBack index (EventStream model) =
 
 length : EventStream serverEvent serverModel serverCmd clientEvent model cmd -> Int
 length (EventStream model) = Array.length model.stream
+
+numberOfClients : EventStream serverEvent serverModel serverCmd clientEvent model cmd -> Int
+numberOfClients (EventStream {clients}) = Dict.size clients
+
+clients : EventStream serverEvent serverModel serverCmd clientEvent model cmd -> List ClientId
+clients (EventStream {clients}) = clients |> Dict.values |> List.map (\(cid,_) -> cid)
 
 view : EventStream serverEvent serverModel serverCmd clientEvent model cmd -> List (Int, Event serverEvent clientEvent)
 view (EventStream model) =
