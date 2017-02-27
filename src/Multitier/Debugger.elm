@@ -59,7 +59,7 @@ program :
   , update : msg -> model -> ( model, MultitierCmd remoteServerMsg msg )
   , subscriptions : model -> Sub msg
   , view : model -> Html msg
-  , serverState : serverModel -> (serverState, serverModel, Cmd serverMsg)
+  , serverState : serverModel -> serverState
   , serverRPCs : remoteServerMsg -> RPC serverModel msg serverMsg
   , initServer: (serverModel, Cmd serverMsg)
   , updateServer : serverMsg -> serverModel -> (serverModel, Cmd serverMsg)
@@ -231,20 +231,13 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
 
 type alias ServerState serverState = { appServerState: serverState }
 
-wrapServerState : (serverModel -> (serverState, serverModel, Cmd serverMsg)) -> (ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerState serverState, ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg)))
-wrapServerState serverState = \serverModel -> case serverModel.debugger.appState of
-  Running state ->
-    let (appServerState, newAppModel, newCmd) = serverState state.appModel in
-      let debugger = serverModel.debugger in
-        let (wrappedServerModel, wrappedCmd) = { serverModel | debugger = { debugger | appState = Running (State newAppModel (Array.push (StateEvent, newAppModel, newCmd) state.events) state.previous) }} ! [Cmd.map ServerAppMsg newCmd] in
-          (ServerState appServerState, wrappedServerModel,wrappedCmd)
-  Paused state ->
-    let (appServerState,_,_) = serverState state.appModel in
-      (ServerState appServerState, serverModel, Cmd.none)
-
-
-
-
+wrapServerState : (serverModel -> serverState) -> (ServerModel serverModel serverMsg remoteServerMsg model msg -> ServerState serverState)
+wrapServerState serverState = \serverModel ->
+  let appState = case serverModel.debugger.appState of
+    Running state -> state
+    Paused state -> state in
+  ServerState (serverState appState.appModel)
+  
 -- SERVER-SUBSCRIPTIONS
 
 wrapServerSubscriptions : (serverModel -> Sub serverMsg) -> (ServerModel serverModel serverMsg remoteServerMsg model msg -> Sub (ServerMsg serverMsg))
