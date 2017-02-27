@@ -21,7 +21,7 @@ import Multitier.RPC as RPC exposing (RPC, rpc)
 import Multitier.Error exposing (Error)
 import Multitier.Server.WebSocket as ServerWebSocket exposing (ClientId)
 import Multitier.LowLevel exposing (toJSON, fromJSONString)
-import Multitier.Server.Console as Console
+-- import Multitier.Server.Console as Console
 
 import Multitier.Debugger.EventStream as EventStream exposing (EventStream, Event(..))
 
@@ -181,7 +181,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
   AddClientEvent cid event model cmd -> rpc Handle
     (\serverModel -> let debugger = serverModel.debugger in
       case debugger.state of
-        Running -> ({ serverModel | debugger = { debugger | events = EventStream.pushClientEvent cid (event,model,cmd) debugger.events }}, Task.succeed (), Console.log (toString (EventStream.pushClientEvent cid (event,model,cmd) debugger.events)))
+        Running -> ({ serverModel | debugger = { debugger | events = EventStream.pushClientEvent cid (event,model,cmd) debugger.events }}, Task.succeed (), Cmd.none)
         Paused -> (serverModel, Task.succeed (), Cmd.none)) -- TODO what to do in this case?
 
   PauseDebugger -> rpc Handle
@@ -499,7 +499,8 @@ eventsView smodel =
       |> List.map (\(index, event) -> Html.option [onClick (GoBack index), selected (previousIndex == index)] [Html.text (eventView event)])
       |> List.reverse
   in Html.div [] [
-    Html.select [size 15] options]
+    Html.select [size 15] options,
+    Html.pre [] [Html.text (toString smodel.events)]]
 
 type alias ActionProps msg =
   { btnAction: msg
