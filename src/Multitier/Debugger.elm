@@ -486,8 +486,8 @@ timelineView smodel =
           ServerEvent serverEvent ->
             Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] []
           ClientEvent cid clientEvent ->
-            let index = Maybe.withDefault 0 (Dict.get (toString cid) clientIndices) in
-              Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((index * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] [])
+            let clientIndex = Maybe.withDefault 0 (Dict.get (toString cid) clientIndices) in
+              Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((clientIndex * eventSpacing) + offset )), cy (toString ((index * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] [])
 
 
     serverLine = Svg.line [x1 (toString offset), y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []
