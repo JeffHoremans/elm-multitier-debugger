@@ -181,7 +181,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
   AddClientEvent cid event model cmd -> rpc Handle
     (\serverModel -> let debugger = serverModel.debugger in
       case debugger.state of
-        Running -> ({ serverModel | debugger = { debugger | events = EventStream.pushClientEvent cid (event,model,cmd) debugger.events }}, Task.succeed (), Cmd.none)
+        Running -> ({ serverModel | debugger = { debugger | events = EventStream.pushClientEvent cid (event,model,cmd) debugger.events }}, Task.succeed (), Console.log "Pushing client event...")
         Paused -> (serverModel, Task.succeed (), Cmd.none)) -- TODO what to do in this case?
 
   PauseDebugger -> rpc Handle
@@ -391,7 +391,7 @@ updateAppModel update appMsg cid cmodel =
   case cmodel.state of
     Running ->
       let (newAppModel, newCmd) = update appMsg cmodel.appModel in
-        { cmodel | appModel = newAppModel } !! [Multitier.map RemoteServerAppMsg AppMsg newCmd, performOnServer (AddClientEvent cid (MsgEvent appMsg) newAppModel newCmd), performOnClient (Console.log "Adding client event...")]
+        { cmodel | appModel = newAppModel } !! [Multitier.map RemoteServerAppMsg AppMsg newCmd, performOnServer (AddClientEvent cid (MsgEvent appMsg) newAppModel newCmd)]
     Paused -> cmodel !! []
 
 -- SUBSCRIPTIONS
