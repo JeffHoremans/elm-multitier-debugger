@@ -471,6 +471,10 @@ wrapView appView = \model -> case model of
 timelineView : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 timelineView smodel =
   let
+    clients = EventStream.clients smodel.events |> List.indexedMap (\index cid -> ((toString cid), index)) in
+  let
+    clientIndices = clients |> Dict.fromList in
+  let
     previousIndex = case smodel.previous of
       Just previous -> previous.index
       _ -> (EventStream.length smodel.events) - 1
@@ -478,18 +482,24 @@ timelineView smodel =
     eventSpacing = 25
     circles =
       EventStream.view smodel.events
-        |> List.map (\(index, event) -> Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] [])
+        |> List.map (\(index, event) -> case event of
+          ServerEvent serverEvent ->
+            Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] []
+          ClientEvent cid clientEvent ->
+            let index = Maybe.withDefault 0 (Dict.get (toString cid) clientIndices) in
+              Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((index * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] [])
 
-    lines =
-      EventStream.clients smodel.events
-        |> List.indexedMap (,)
-        |> List.map (\(index,cid) -> Svg.line [x1 (toString offset), y1 (toString ((index * 40) + 60)), x2 "100%", y2 (toString ((index * 40) + 60)), style [("stroke", "black"), ("stroke-width", "3")]] [])
+
+    serverLine = Svg.line [x1 (toString offset), y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []
+    clientLines =
+      clients
+        |> List.map (\(_,index) -> Svg.line [x1 (toString offset), y1 (toString ((index * 40) + 60)), x2 "100%", y2 (toString ((index * 40) + 60)), style [("stroke", "black"), ("stroke-width", "3")]] [])
   in
   Html.div [id "timeline", style [("overflow-x", "auto")]] [
     Svg.svg [ width (toString ((((EventStream.length smodel.events) - 1) * eventSpacing) + (offset * 2))), height (toString (40 * ((EventStream.numberOfClients smodel.events) + 1)))]
       (List.concat [
-        [Svg.line [x1 (toString offset), y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []],
-        lines,
+        [serverLine],
+        clientLines,
         circles ])]
 
 eventsView : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
