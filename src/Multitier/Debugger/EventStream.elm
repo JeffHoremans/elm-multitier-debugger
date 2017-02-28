@@ -32,7 +32,7 @@ type Event serverMsg remoteServerMsg msg =
   ServerEvent (ServerEventType serverMsg remoteServerMsg) |
   ClientEvent ClientId (ClientEventType msg)
 
-type ClientEventType msg = Init (List Int) | MsgEvent (List Int) msg
+type ClientEventType msg = Init (List Int) | MsgEvent (Maybe Int) (List Int) msg
 type ServerEventType serverMsg remoteServerMsg = InitServer | ServerMsgEvent serverMsg | RPCevent ClientId Int remoteServerMsg
 
 type alias EventRecoveryState serverModel serverMsg remoteServerMsg model msg =

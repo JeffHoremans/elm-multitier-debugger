@@ -224,7 +224,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
 
 
   RemoteServerAppMsg cid rpcid msg ->
-    RPC.map AppMsg ServerAppMsg
+    RPC.map (AppMsg (Just rpcid)) ServerAppMsg
       (\appModel serverModel ->
         let debugger = serverModel.debugger in
           case debugger.state of
@@ -271,7 +271,7 @@ wrapInit : (serverState -> (model, MultitierCmd remoteServerMsg msg)) -> (Server
 wrapInit init = \serverState -> Uninitialized (init serverState.appServerState) !! []
 
 type Msg model msg serverModel serverMsg remoteServerMsg =
-  AppMsg msg |
+  AppMsg (Maybe Int) msg |
 
   OnSocketMsg String |
 
@@ -310,7 +310,7 @@ wrapUpdate update = \msg model -> case model of
     _ -> model !! []
 
   ClientDebugger cid cmodel -> case msg of
-    AppMsg appMsg -> let (newcmodel, cmd) = updateAppModel update appMsg cid cmodel in ClientDebugger cid newcmodel !! [cmd]
+    AppMsg rpcid appMsg -> let (newcmodel, cmd) = updateAppModel update appMsg cid rpcid cmodel in ClientDebugger cid newcmodel !! [cmd]
 
     OnSocketMsg data -> case (fromJSONString data) of
       PauseClient -> let (newcmodel, cmd) = pauseClient cmodel in ClientDebugger cid newcmodel !! [cmd]
@@ -327,7 +327,7 @@ wrapUpdate update = \msg model -> case model of
     _ -> model !! []
 
   Switching cid cmodel -> case msg of
-    AppMsg appMsg -> let (newcmodel, cmd) = updateAppModel update appMsg cid cmodel in Switching cid newcmodel !! [cmd]
+    AppMsg rpcid appMsg -> let (newcmodel, cmd) = updateAppModel update appMsg cid rpcid cmodel in Switching cid newcmodel !! [cmd]
     OnSocketMsg data -> case (fromJSONString data) of
       PauseClient -> let (newcmodel, cmd) = pauseClient cmodel in Switching cid newcmodel !! [cmd]
       ResumeClientFromPaused -> let (newcmodel, cmd) = resumeClientFromPaused cmodel in Switching cid newcmodel !! [cmd]
@@ -345,7 +345,7 @@ wrapUpdate update = \msg model -> case model of
     _ -> model !! []
 
   ServerDebugger cid smodel cmodel -> case msg of
-    AppMsg appMsg -> let (newcmodel, cmd) = updateAppModel update appMsg cid cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
+    AppMsg rpcid appMsg -> let (newcmodel, cmd) = updateAppModel update appMsg cid rpcid cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
 
     OnSocketMsg data -> case (fromJSONString data) of
       SetServerModel serverModel -> ServerDebugger cid serverModel cmodel !! []
@@ -381,19 +381,19 @@ resumeClientFromPrevious cid prev cmodel = case prev of
   _ -> { cmodel | state = ClientUnvalid } !! []
 
 
-updateAppModel : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> msg -> ClientId -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
-updateAppModel update appMsg cid cmodel =
+updateAppModel : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> msg -> ClientId -> Maybe Int -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
+updateAppModel update appMsg cid rpcid cmodel =
   case cmodel.state of
     ClientRunning ->
       let (newAppModel, newCmd) = update appMsg cmodel.appModel in
         let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds cid cmodel newCmd in
-          { rpcWrappedModel | appModel = newAppModel } !! [rpcWrappedCmds, performOnServer (AddClientEvent cid cmodel.rpccounter (MsgEvent rpcIds appMsg) newAppModel newCmd)]
+          { rpcWrappedModel | appModel = newAppModel } !! [rpcWrappedCmds, performOnServer (AddClientEvent cid cmodel.rpccounter (MsgEvent rpcid rpcIds appMsg) newAppModel newCmd)]
     _ -> cmodel !! []
 
 wrapRPCcmds : ClientId -> ClientDebuggerModel model -> MultitierCmd remoteServerMsg msg -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg), List Int)
 wrapRPCcmds cid model cmd = case cmd of
-  ServerCmd remoteServerMsg -> ({ model | rpccounter = model.rpccounter + 1 }, Multitier.map (RemoteServerAppMsg cid model.rpccounter) AppMsg cmd, [model.rpccounter])
-  ClientCmd _ -> (model, Multitier.map (RemoteServerAppMsg cid model.rpccounter) AppMsg cmd, [])
+  ServerCmd remoteServerMsg -> ({ model | rpccounter = model.rpccounter + 1 }, Multitier.map (RemoteServerAppMsg cid model.rpccounter) (AppMsg Maybe.Nothing) cmd, [model.rpccounter])
+  ClientCmd _ -> (model, Multitier.map (RemoteServerAppMsg cid model.rpccounter) (AppMsg Maybe.Nothing) cmd, [])
   Batch cmds -> List.foldl (\currentCmd (prevModel, prevCmd, prevRPCids) -> let (newModel, newCmd, newRPCids) = (wrapRPCcmds cid prevModel currentCmd) in
                                                                     (newModel, Multitier.batch [newCmd,prevCmd], List.append prevRPCids newRPCids)) (model,Multitier.none,[]) cmds
 
@@ -402,8 +402,8 @@ wrapRPCcmds cid model cmd = case cmd of
 wrapSubscriptions : (model -> Sub msg) -> (Model model msg serverModel serverMsg remoteServerMsg -> Sub (Msg model msg serverModel serverMsg remoteServerMsg))
 wrapSubscriptions subscriptions = \model ->
   let appSubs = \cmodel -> case cmodel.state of
-    ClientRunning -> Sub.map AppMsg (subscriptions cmodel.appModel)
-    ClientPaused -> Sub.map AppMsg (subscriptions cmodel.appModel)
+    ClientRunning -> Sub.map (AppMsg Maybe.Nothing) (subscriptions cmodel.appModel)
+    ClientPaused -> Sub.map (AppMsg Maybe.Nothing) (subscriptions cmodel.appModel)
     _ -> Sub.none
   in let subs = case model of
     Uninitialized _ -> Sub.none
@@ -436,7 +436,7 @@ wrapView appView = \model -> case model of
     let view divAtt =
       Html.div [] [
         Html.div divAtt [
-          Html.map AppMsg (appView cmodel.appModel)], -- TODO if previous then previousModel
+          Html.map (AppMsg Maybe.Nothing) (appView cmodel.appModel)], -- TODO if previous then previousModel
         Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
           Html.button [onClick SwitchDebugger] [Html.text "Switch to server debugger"],
           Html.pre [] [
@@ -491,7 +491,7 @@ timelineView smodel =
               let circle = Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((clientIndex * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] [] in
                 let rpcIds = case clientEvent of
                   Init ids -> ids
-                  MsgEvent ids _ -> ids in
+                  MsgEvent _ ids _ -> ids in
                     let rpcLines = rpcIds |> List.map (\rpcid ->
                       let serverEventIndex = EventStream.getRPCeventIndex cid rpcid smodel.events in
                         case serverEventIndex of
@@ -538,7 +538,9 @@ eventView event = case event of
 clientEventView : ClientId -> ClientEventType msg -> String
 clientEventView cid event = case event of
   Init rpcids -> "[Init-"++ (toString cid) ++ "-" ++ (toString rpcids) ++"]"
-  MsgEvent rpcids msg -> "[Msg-"++ (toString cid) ++"-"++ (toString rpcids) ++"] " ++ (toString msg)
+  MsgEvent maybeRPCid rpcids msg -> case maybeRPCid of
+    Just rpcid -> "[Msg-"++ (toString cid) ++"-"++ (toString rpcid) ++ "-" ++ (toString rpcids) ++"] " ++ (toString msg)
+    _ -> "[Msg-"++ (toString cid) ++ "-" ++ (toString rpcids) ++"] " ++ (toString msg)
 
 serverEventView : ServerEventType serverMsg remoteServerMsg -> String
 serverEventView event = case event of
