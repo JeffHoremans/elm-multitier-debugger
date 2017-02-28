@@ -31,7 +31,7 @@ type Event serverMsg remoteServerMsg msg =
   ClientEvent ClientId (ClientEventType msg)
 
 type ClientEventType msg = Init | MsgEvent msg
-type ServerEventType serverMsg remoteServerMsg = InitServer | ServerMsgEvent serverMsg | RPCevent ClientId remoteServerMsg
+type ServerEventType serverMsg remoteServerMsg = InitServer | ServerMsgEvent serverMsg | RPCevent ClientId Int remoteServerMsg
 
 type alias EventRecoveryState serverModel serverMsg remoteServerMsg model msg =
   { server : (serverModel, Cmd serverMsg)
