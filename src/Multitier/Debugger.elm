@@ -304,8 +304,8 @@ wrapUpdate update = \msg model -> case model of
         let newcmodel = case initData.paused of
           True -> ClientDebuggerModel ClientPaused appModel 0
           False -> ClientDebuggerModel ClientRunning appModel 0 in
-            let (rpcWrappedModel, rpcWrappedCmds) = wrapRPCcmds initData.cid newcmodel cmd in
-              ClientDebugger initData.cid rpcWrappedModel !! [rpcWrappedCmds, performOnServer (AddClientEvent initData.cid Init appModel cmd)]
+            let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds initData.cid newcmodel cmd in
+              ClientDebugger initData.cid rpcWrappedModel !! [rpcWrappedCmds, performOnServer (AddClientEvent initData.cid (Init rpcIds) appModel cmd) ]
       _ -> model !! []
     _ -> model !! []
 
@@ -376,7 +376,7 @@ resumeClientFromPaused cmodel = { cmodel | state = ClientRunning } !! []
 
 resumeClientFromPrevious : ClientId -> Maybe (ClientId, (model,(MultitierCmd remoteServerMsg msg))) -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
 resumeClientFromPrevious cid prev cmodel = case prev of
-  Just (_,(prevModel,prevCmd)) -> let (rpcWrappedModel, rpcWrappedCmds) = wrapRPCcmds cid cmodel prevCmd in
+  Just (_,(prevModel,prevCmd)) -> let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds cid cmodel prevCmd in
     { rpcWrappedModel | state = ClientRunning, appModel = prevModel } !! [rpcWrappedCmds]
   _ -> { cmodel | state = ClientUnvalid } !! []
 
@@ -386,15 +386,16 @@ updateAppModel update appMsg cid cmodel =
   case cmodel.state of
     ClientRunning ->
       let (newAppModel, newCmd) = update appMsg cmodel.appModel in
-        let (rpcWrappedModel, rpcWrappedCmds) = wrapRPCcmds cid cmodel newCmd in
-          { rpcWrappedModel | appModel = newAppModel } !! [rpcWrappedCmds, performOnServer (AddClientEvent cid (MsgEvent appMsg) newAppModel newCmd)]
+        let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds cid cmodel newCmd in
+          { rpcWrappedModel | appModel = newAppModel } !! [rpcWrappedCmds, performOnServer (AddClientEvent cid (MsgEvent rpcIds appMsg) newAppModel newCmd)]
     _ -> cmodel !! []
 
-wrapRPCcmds : ClientId -> ClientDebuggerModel model -> MultitierCmd remoteServerMsg msg -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
+wrapRPCcmds : ClientId -> ClientDebuggerModel model -> MultitierCmd remoteServerMsg msg -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg), List Int)
 wrapRPCcmds cid model cmd = case cmd of
-  ServerCmd remoteServerMsg -> { model | rpccounter = model.rpccounter + 1 } !! [Multitier.map (RemoteServerAppMsg cid model.rpccounter) AppMsg cmd]
-  ClientCmd _ -> model !! [Multitier.map (RemoteServerAppMsg cid model.rpccounter) AppMsg cmd]
-  Batch cmds -> List.foldl (\currentCmd (prevModel, prevCmd) -> let (newModel, newCmd) = (wrapRPCcmds cid prevModel currentCmd) in newModel !! [newCmd,prevCmd]) (model !! []) cmds
+  ServerCmd remoteServerMsg -> ({ model | rpccounter = model.rpccounter + 1 }, Multitier.map (RemoteServerAppMsg cid model.rpccounter) AppMsg cmd, [model.rpccounter])
+  ClientCmd _ -> (model, Multitier.map (RemoteServerAppMsg cid model.rpccounter) AppMsg cmd, [])
+  Batch cmds -> List.foldl (\currentCmd (prevModel, prevCmd, prevRPCids) -> let (newModel, newCmd, newRPCids) = (wrapRPCcmds cid prevModel currentCmd) in
+                                                                    (newModel, Multitier.batch [newCmd,prevCmd], List.append prevRPCids newRPCids)) (model,Multitier.none,[]) cmds
 
 -- SUBSCRIPTIONS
 
@@ -483,10 +484,18 @@ timelineView smodel =
       EventStream.view smodel.events
         |> List.map (\(index, event) -> case event of
           ServerEvent serverEvent ->
-            Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] []
+            [Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] []]
           ClientEvent cid clientEvent ->
             let clientIndex = Maybe.withDefault 0 (Dict.get (toString cid) clientIndices) in
-              Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((clientIndex * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] [])
+              let circle = Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((clientIndex * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] [] in
+                let rpcIds = case clientEvent of
+                  Init ids -> ids
+                  MsgEvent ids _ -> ids in
+                    let rpcLines = rpcIds |> List.map (\rpcid ->
+                      let serverEventIndex = EventStream.getRPCeventIndex cid rpcid smodel.events in
+                        Svg.line [x1 (toString ((index * eventSpacing) + offset )), y1 (toString ((clientIndex * 40) + 60)), x2 (toString ((serverEventIndex * eventSpacing) + offset )), y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []) in
+                      circle :: rpcLines)
+        |> List.concat
 
 
     serverLine = Svg.line [x1 (toString offset), y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []
@@ -520,19 +529,19 @@ type alias ActionProps msg =
 
 eventView : Event serverMsg remoteServerMsg msg -> String
 eventView event = case event of
-  ClientEvent cid cevent -> clientEventView cevent
+  ClientEvent cid cevent -> clientEventView cid cevent
   ServerEvent sevent -> serverEventView sevent
 
-clientEventView : ClientEventType msg -> String
-clientEventView event = case event of
-  Init -> "[Init]"
-  MsgEvent msg -> "[Msg] " ++ (toString msg)
+clientEventView : ClientId -> ClientEventType msg -> String
+clientEventView cid event = case event of
+  Init rpcids -> "[Init-"++ (toString cid) ++ "-" ++ (toString rpcids) ++"]"
+  MsgEvent rpcids msg -> "[Msg-"++ (toString cid) ++"-"++ (toString rpcids) ++"] " ++ (toString msg)
 
 serverEventView : ServerEventType serverMsg remoteServerMsg -> String
 serverEventView event = case event of
   InitServer -> "[Init-Server]"
   ServerMsgEvent msg -> "[ServerMsg] " ++ (toString msg)
-  RPCevent cid rpcid msg -> "[RPC-" ++ (toString cid) ++"-" ++ (toString rpcid) ++"] " ++ (toString msg)
+  RPCevent cid rpcid msg -> "[RP-" ++ (toString cid) ++"-" ++ (toString rpcid) ++"] " ++ (toString msg)
 
 serverActions : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> ActionProps (Msg model msg serverModel serverMsg remoteServerMsg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 serverActions model props = Html.div [] [

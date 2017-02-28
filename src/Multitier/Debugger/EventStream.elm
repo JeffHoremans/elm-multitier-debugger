@@ -12,6 +12,7 @@ module Multitier.Debugger.EventStream
     , length
     , clients
     , numberOfClients
+    , getRPCeventIndex
     , view )
 
 import Array exposing (Array)
@@ -24,33 +25,42 @@ type EventStream serverModel serverMsg remoteServerMsg model msg = EventStream (
 type alias Model serverModel serverMsg remoteServerMsg model msg =
   { stream : Array (Event serverMsg remoteServerMsg msg, EventRecoveryState serverModel serverMsg remoteServerMsg model msg)
   , server : (serverModel, Cmd serverMsg)
-  , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg)) }
+  , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg))
+  , rpcindices : Dict (String,Int) Int }
 
 type Event serverMsg remoteServerMsg msg =
   ServerEvent (ServerEventType serverMsg remoteServerMsg) |
   ClientEvent ClientId (ClientEventType msg)
 
-type ClientEventType msg = Init | MsgEvent msg
+type ClientEventType msg = Init (List Int) | MsgEvent (List Int) msg
 type ServerEventType serverMsg remoteServerMsg = InitServer | ServerMsgEvent serverMsg | RPCevent ClientId Int remoteServerMsg
 
 type alias EventRecoveryState serverModel serverMsg remoteServerMsg model msg =
   { server : (serverModel, Cmd serverMsg)
-  , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg))}
+  , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg))
+  , rpcindices : Dict (String,Int) Int}
+
+getRPCeventIndex : ClientId -> Int -> EventStream serverModel serverMsg remoteServerMsg model msg -> Int
+getRPCeventIndex cid rpcid (EventStream {rpcindices}) =
+  Maybe.withDefault -1 (Dict.get ((toString cid),rpcid) rpcindices)
 
 empty : (serverModel, Cmd serverMsg) -> EventStream serverModel serverMsg remoteServerMsg model msg
-empty serverState = EventStream (Model Array.empty serverState Dict.empty)
+empty serverState = EventStream (Model Array.empty serverState Dict.empty Dict.empty)
 
 pushServerEvent : ((ServerEventType serverMsg remoteServerMsg), serverModel, Cmd serverMsg) -> EventStream serverModel serverMsg remoteServerMsg model msg -> EventStream serverModel serverMsg remoteServerMsg model msg
-pushServerEvent (serverEvent, serverModel, serverCmd) (EventStream {stream, clients}) =
-  let newStream = Array.push (ServerEvent serverEvent, EventRecoveryState (serverModel, serverCmd) clients) stream
-      newServer = (serverModel, serverCmd) in
-    EventStream (Model newStream newServer clients)
+pushServerEvent (serverEvent, serverModel, serverCmd) (EventStream {stream, clients, rpcindices}) =
+  let newServer = (serverModel, serverCmd)
+      newRPCindices = case serverEvent of
+        RPCevent cid rpcid _ -> Dict.insert ((toString cid),rpcid) (Array.length stream) rpcindices
+        _ -> rpcindices in
+  let newStream = Array.push (ServerEvent serverEvent, EventRecoveryState (serverModel, serverCmd) clients newRPCindices) stream in
+    EventStream (Model newStream newServer clients newRPCindices)
 
 pushClientEvent : ClientId -> ((ClientEventType msg), model, MultitierCmd remoteServerMsg msg) -> EventStream serverModel serverMsg remoteServerMsg model msg -> EventStream serverModel serverMsg remoteServerMsg model msg
-pushClientEvent cid (clientEvent, model, cmd) (EventStream {stream, server, clients}) =
+pushClientEvent cid (clientEvent, model, cmd) (EventStream {stream, server, clients, rpcindices}) =
   let newClients = Dict.insert (toString cid) (cid, (model, cmd)) clients
-      newStream = Array.push (ClientEvent cid clientEvent, EventRecoveryState server newClients) stream in
-    EventStream (Model newStream server newClients)
+      newStream = Array.push (ClientEvent cid clientEvent, EventRecoveryState server newClients rpcindices) stream in
+    EventStream (Model newStream server newClients rpcindices)
 
 previousState : Int -> EventStream serverModel serverMsg remoteServerMsg model msg -> (serverModel, Cmd serverMsg, Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg)))
 previousState index (EventStream {stream, server}) =
@@ -59,16 +69,16 @@ previousState index (EventStream {stream, server}) =
     _ -> let (serverModel, serverCmd) = server in (serverModel, serverCmd, Dict.empty)
 
 previousRecoveryState : Int -> EventStream serverModel serverMsg remoteServerMsg model msg -> EventRecoveryState serverModel serverMsg remoteServerMsg model msg
-previousRecoveryState index (EventStream {stream, server, clients}) =
+previousRecoveryState index (EventStream {stream, server, clients, rpcindices}) =
   case Array.get index stream of
     Just (_, recoveryState) -> recoveryState
-    _ -> EventRecoveryState server clients
+    _ -> EventRecoveryState server clients rpcindices
 
 goBack : Int -> EventStream serverModel serverMsg remoteServerMsg model msg -> EventStream serverModel serverMsg remoteServerMsg model msg
 goBack index (EventStream model) =
   let newStream = model.stream |> Array.slice 0 (index+1)
       recovery = previousRecoveryState index (EventStream model) in
-    EventStream (Model newStream recovery.server recovery.clients)
+    EventStream (Model newStream recovery.server recovery.clients recovery.rpcindices)
 
 length : EventStream serverModel serverMsg remoteServerMsg model msg -> Int
 length (EventStream model) = Array.length model.stream
