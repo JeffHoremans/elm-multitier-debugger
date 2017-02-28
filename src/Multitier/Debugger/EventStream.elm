@@ -40,9 +40,8 @@ type alias EventRecoveryState serverModel serverMsg remoteServerMsg model msg =
   , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg))
   , rpcindices : Dict (String,Int) Int}
 
-getRPCeventIndex : ClientId -> Int -> EventStream serverModel serverMsg remoteServerMsg model msg -> Int
-getRPCeventIndex cid rpcid (EventStream {rpcindices}) =
-  Maybe.withDefault -1 (Dict.get ((toString cid),rpcid) rpcindices)
+getRPCeventIndex : ClientId -> Int -> EventStream serverModel serverMsg remoteServerMsg model msg -> Maybe Int
+getRPCeventIndex cid rpcid (EventStream {rpcindices}) = Dict.get ((toString cid),rpcid) rpcindices
 
 empty : (serverModel, Cmd serverMsg) -> EventStream serverModel serverMsg remoteServerMsg model msg
 empty serverState = EventStream (Model Array.empty serverState Dict.empty Dict.empty)

@@ -493,8 +493,10 @@ timelineView smodel =
                   MsgEvent ids _ -> ids in
                     let rpcLines = rpcIds |> List.map (\rpcid ->
                       let serverEventIndex = EventStream.getRPCeventIndex cid rpcid smodel.events in
-                        Svg.line [x1 (toString ((index * eventSpacing) + offset )), y1 (toString ((clientIndex * 40) + 60)), x2 (toString ((serverEventIndex * eventSpacing) + offset )), y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []) in
-                      circle :: rpcLines)
+                        case serverEventIndex of
+                          Just serverIndex -> [Svg.line [x1 (toString ((index * eventSpacing) + offset )), y1 (toString ((clientIndex * 40) + 60)), x2 (toString ((serverIndex * eventSpacing) + offset )), y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []]
+                          _ -> []) in
+                      circle :: (List.concat rpcLines))
         |> List.concat
 
 
