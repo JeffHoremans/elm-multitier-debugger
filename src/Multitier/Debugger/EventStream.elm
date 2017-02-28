@@ -5,8 +5,7 @@ module Multitier.Debugger.EventStream
     , empty
     , pushServerEvent
     , pushClientEvent
-    , previousServerState
-    , previousClientState
+    , previousState
     , goBack
     , length
     , clients
@@ -48,26 +47,17 @@ pushClientEvent cid (clientEvent, model, cmd) (EventStream {stream, server, clie
   let newStream = Array.push (ClientEvent cid clientEvent, EventRecoveryState server newClients) stream in
     EventStream (Model newStream server newClients)
 
-previousServerState : (serverModel,serverCmd) -> Int -> EventStream serverEvent serverModel serverCmd clientEvent model cmd -> (serverModel, serverCmd)
-previousServerState default index (EventStream {stream}) =
+previousState : Int -> EventStream serverEvent serverModel serverCmd clientEvent model cmd -> (serverModel, serverCmd, Dict String (ClientId, (model,cmd)))
+previousState index (EventStream {stream, server}) =
   case Array.get index stream of
-    Just (_, recoveryState) -> recoveryState.server
-    _ -> default
-
-previousClientState : ClientId -> (model,cmd) -> Int -> EventStream serverEvent serverModel serverCmd clientEvent model cmd -> (model, cmd)
-previousClientState cid default index (EventStream {stream}) =
-  case Array.get index stream of
-    Just (_, recoveryState) -> case Dict.get (toString cid) recoveryState.clients of
-      Just (_,result) -> result
-      _ -> default
-    _ -> default
+    Just (_, recoveryState) -> let (serverModel, serverCmd) = recoveryState.server in (serverModel, serverCmd, recoveryState.clients)
+    _ -> let (serverModel, serverCmd) = server in (serverModel, serverCmd, Dict.empty)
 
 goBack : Int -> EventStream serverEvent serverModel serverCmd clientEvent model cmd -> EventStream serverEvent serverModel serverCmd clientEvent model cmd
 goBack index (EventStream model) =
   let newStream = model.stream |> Array.slice 0 (index+1)
-      newServer = previousServerState model.server index (EventStream model)
-      newClients = Dict.map (\key (cid,current) -> (cid, (previousClientState cid current index (EventStream model)))) model.clients
-  in EventStream (Model newStream newServer newClients)
+      (newServerModel, newServerCmd, newClients) = previousState index (EventStream model)
+  in EventStream (Model newStream (newServerModel, newServerCmd) newClients)
 
 length : EventStream serverEvent serverModel serverCmd clientEvent model cmd -> Int
 length (EventStream model) = Array.length model.stream

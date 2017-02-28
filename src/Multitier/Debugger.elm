@@ -29,11 +29,12 @@ type ResumeStrategy = FromPrevious | FromPaused
 resumeStrategies : Array ResumeStrategy
 resumeStrategies = Array.fromList [FromPrevious, FromPaused]
 
-type DebuggerState = Running | Paused
+type ServerDebuggerState = Running | Paused
 
-type alias PreviousState model cmd =
-  { appModel : model
-  , cmd : cmd
+type alias PreviousState serverModel serverCmd model cmd =
+  { appModel : serverModel
+  , cmd : serverCmd
+  , clients : Dict String (ClientId, (model,cmd))
   , index : Int }
 
 -- PROGRAM
@@ -69,14 +70,13 @@ program stuff = Multitier.program
 type alias ServerModel serverModel serverMsg remoteServerMsg model msg =
   { debugger: ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg
   , clients :
-    { debugging: Dict String ClientId
-    , connected: Dict String ClientId }}
+    { debugging: Dict String ClientId }}
 
 type alias ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg =
-  { state: DebuggerState
+  { state: ServerDebuggerState
   , appModel : serverModel
   , events : EventStream (ServerEvent serverMsg remoteServerMsg) serverModel (Cmd serverMsg) (ClientEvent msg) model (MultitierCmd remoteServerMsg msg)
-  , previous : Maybe (PreviousState serverModel (Cmd serverMsg))
+  , previous : Maybe (PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg))
   , resume : ResumeStrategy
   , clientIds : List String }
 
@@ -95,8 +95,7 @@ wrapInitServer (serverModel, cmd) =
     , resume = FromPaused
     , clientIds = [] }
   , clients =
-    { debugging = Dict.empty
-    , connected = Dict.empty }} ! [Cmd.map ServerAppMsg cmd]
+    { debugging = Dict.empty }} ! [Cmd.map ServerAppMsg cmd]
 
 type ServerMsg serverMsg = ServerAppMsg serverMsg |
                            OnClientConnect ClientId | OnClientDisconnect ClientId |
@@ -115,11 +114,9 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
         Paused -> serverModel ! []
 
     OnClientConnect cid ->
-      { serverModel | debugger =  { debugger | clientIds = (toString cid) :: debugger.clientIds },
-                      clients =   { clients  | connected = Dict.insert (toString cid) cid clients.connected }}
-        ! [initializeClient serverModel cid]
+      { serverModel | debugger =  { debugger | clientIds = (toString cid) :: debugger.clientIds }} ! [initializeClient serverModel cid]
     OnClientDisconnect cid ->
-      { serverModel | clients =   { clients  | debugging = Dict.remove (toString cid) clients.debugging, connected = Dict.remove (toString cid) clients.connected }} ! []
+      { serverModel | clients =   { clients  | debugging = Dict.remove (toString cid) clients.debugging }} ! []
 
     Nothing -> serverModel ! []
 
@@ -144,11 +141,17 @@ sendSocketMsg cid msg = ServerWebSocket.send socketPath cid (Encode.encode 0 (to
 broadcastPauseAction : Cmd (ServerMsg serverMsg)
 broadcastPauseAction = broadcastSocketMsg (PauseClient)
 
-broadcastResumeAction : Cmd (ServerMsg serverMsg)
-broadcastResumeAction = broadcastSocketMsg (ResumeClient)
+broadcastResumeFromPausedAction : Cmd (ServerMsg serverMsg)
+broadcastResumeFromPausedAction = broadcastSocketMsg ResumeClientFromPaused
 
-broadcastGoBackAction : Cmd (ServerMsg serverMsg)
-broadcastGoBackAction = broadcastSocketMsg (GoBackClient)
+broadcastResumeFromPreviousAction : PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg) -> ServerModel serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
+broadcastResumeFromPreviousAction previous serverModel =
+  EventStream.clients serverModel.debugger.events
+    |> List.map (\cid -> case Dict.member (toString cid) previous.clients of
+        True -> sendSocketMsg cid (ResumeClientFromPrevious (Dict.get (toString cid) previous.clients))
+        False -> sendSocketMsg cid (ResumeClientFromPrevious Maybe.Nothing))
+    |> Cmd.batch
+-- TODO repop clients + delete when disconnecting...
 
 broadcastSocketMsg : SocketMsg serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
 broadcastSocketMsg msg = ServerWebSocket.broadcast socketPath (Encode.encode 0 (toJSON msg))
@@ -198,15 +201,15 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
       Paused ->
         let debugger = serverModel.debugger in
           let (newServerModel, newServerCmd) = case serverModel.debugger.resume of
-            FromPaused -> { serverModel | debugger = { debugger | state = Running }} ! []
+            FromPaused -> { serverModel | debugger = { debugger | state = Running }} ! [broadcastResumeFromPausedAction]
             FromPrevious -> case debugger.previous of
               Just previous ->
                 { serverModel | debugger = { debugger | state = Running
                                                       , appModel = previous.appModel
                                                       , events = EventStream.goBack previous.index debugger.events
-                                                      , previous = Maybe.Nothing }} ! [Cmd.map ServerAppMsg previous.cmd]
-              _ -> serverModel ! [] in
-           (newServerModel, Task.succeed (), Cmd.batch [newServerCmd, broadcastResumeAction, sendDebuggerModel newServerModel])
+                                                      , previous = Maybe.Nothing }} ! [Cmd.map ServerAppMsg previous.cmd, broadcastResumeFromPreviousAction previous serverModel]
+              _ -> { serverModel | debugger = { debugger | state = Running }} ! [broadcastResumeFromPausedAction] in
+           (newServerModel, Task.succeed (), Cmd.batch [newServerCmd, sendDebuggerModel newServerModel])
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
   SetDebuggerResumeStrategy resume -> rpc Handle (\serverModel -> let debugger = serverModel.debugger in ({ serverModel | debugger = { debugger | resume = resume }}, Task.succeed (), Cmd.none))
@@ -217,9 +220,9 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
         let (newServerModel, newCmd) =
           case (index == EventStream.length debugger.events) of
             True -> { serverModel | debugger = { debugger | previous = Maybe.Nothing }} ! []
-            False -> let (previousAppModel, previousCmd) = (EventStream.previousServerState (debugger.appModel,Cmd.none) index debugger.events) in
-              { serverModel | debugger = { debugger | previous = (Just (PreviousState previousAppModel previousCmd index)) }} ! []
-          in (newServerModel, Task.succeed (), Cmd.batch [newCmd, sendDebuggerModel newServerModel])) -- TODO goback to client
+            False -> let (previousAppModel, previousCmd, previousClients) = (EventStream.previousState index debugger.events) in
+              { serverModel | debugger = { debugger | previous = (Just (PreviousState previousAppModel previousCmd previousClients index)) }} ! []
+          in (newServerModel, Task.succeed (), Cmd.batch [newCmd, sendDebuggerModel newServerModel]))
 
 
   RemoteServerAppMsg msg ->
@@ -255,14 +258,15 @@ wrapServerSubscriptions serverSubscriptions =
 
 type Model model msg serverModel serverMsg remoteServerMsg =
   Uninitialized (model, MultitierCmd remoteServerMsg msg) |
-  ClientDebugger ClientId (ClientDebuggerModel model msg remoteServerMsg) |
-  Switching ClientId (ClientDebuggerModel model msg remoteServerMsg) |
-  ServerDebugger ClientId (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg) (ClientDebuggerModel model msg remoteServerMsg)
+  ClientDebugger ClientId (ClientDebuggerModel model) |
+  Switching ClientId (ClientDebuggerModel model) |
+  ServerDebugger ClientId (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg) (ClientDebuggerModel model)
 
-type alias ClientDebuggerModel model msg remoteServerMsg =
-  { state : DebuggerState
-  , appModel : model
-  , previous : Maybe (PreviousState model (MultitierCmd remoteServerMsg msg)) }
+type ClientDebuggerState = ClientRunning | ClientPaused | ClientUnvalid
+
+type alias ClientDebuggerModel model =
+  { state : ClientDebuggerState
+  , appModel : model }
 
 type ClientEvent msg = Init | MsgEvent msg
 
@@ -290,7 +294,7 @@ type SocketMsg serverModel serverMsg remoteServerMsg model msg =
   InitializeClient InitData |
   SetServerModel (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg) |
 
-  PauseClient | ResumeClient | GoBackClient
+  PauseClient | ResumeClientFromPaused | ResumeClientFromPrevious (Maybe (ClientId, (model,(MultitierCmd remoteServerMsg msg))))
 
 -- TODO split in submodules
 
@@ -301,8 +305,8 @@ wrapUpdate update = \msg model -> case model of
     OnSocketMsg data -> case (fromJSONString data) of
       InitializeClient initData ->
         let newcmodel = case initData.paused of
-          True -> ClientDebuggerModel Paused appModel (Just (PreviousState appModel Multitier.none 0))
-          False -> ClientDebuggerModel Running appModel Maybe.Nothing in
+          True -> ClientDebuggerModel ClientPaused appModel
+          False -> ClientDebuggerModel ClientRunning appModel in
             ClientDebugger initData.cid newcmodel !! [Multitier.map RemoteServerAppMsg AppMsg cmd, performOnServer (AddClientEvent initData.cid Init appModel cmd)]
       _ -> model !! []
     _ -> model !! []
@@ -311,14 +315,10 @@ wrapUpdate update = \msg model -> case model of
     AppMsg appMsg -> let (newcmodel, cmd) = updateAppModel update appMsg cid cmodel in ClientDebugger cid newcmodel !! [cmd]
 
     OnSocketMsg data -> case (fromJSONString data) of
-      PauseClient -> let (newcmodel, cmd) = pauseClient cid cmodel in ClientDebugger cid newcmodel !! [cmd]
-      ResumeClient -> let (newcmodel, cmd) = resumeClient cid cmodel in ClientDebugger cid newcmodel !! [cmd]
-      GoBackClient -> let (newcmodel, cmd) = goBackClient cid cmodel in ClientDebugger cid newcmodel !! [cmd]
+      PauseClient -> let (newcmodel, cmd) = pauseClient cmodel in ClientDebugger cid newcmodel !! [cmd]
+      ResumeClientFromPaused -> let (newcmodel, cmd) = resumeClientFromPaused cmodel in ClientDebugger cid newcmodel !! [cmd]
+      ResumeClientFromPrevious prev -> let (newcmodel, cmd) = resumeClientFromPrevious prev cmodel in ClientDebugger cid newcmodel !! [cmd]
       _ -> model !! []
-
-    -- GoBack index -> case cmodel.appState of
-    --   Running state -> ClientDebugger cid { cmodel | appState = Paused (PausedState (getPreviousAppModel state.appModel index state.events) state.events index (RunningState state.appModel Array.empty))  } !! []
-    --   Paused state -> ClientDebugger cid { cmodel | appState = Paused (PausedState (getPreviousAppModel state.pausedModel index state.pausedEvents) state.pausedEvents index state.background) } !! []
 
     SwitchDebugger -> Switching cid cmodel !! [performOnServer (StartDebugView cid)]
 
@@ -331,9 +331,9 @@ wrapUpdate update = \msg model -> case model of
   Switching cid cmodel -> case msg of
     AppMsg appMsg -> let (newcmodel, cmd) = updateAppModel update appMsg cid cmodel in Switching cid newcmodel !! [cmd]
     OnSocketMsg data -> case (fromJSONString data) of
-      PauseClient -> let (newcmodel, cmd) = pauseClient cid cmodel in Switching cid newcmodel !! [cmd]
-      ResumeClient -> let (newcmodel, cmd) = resumeClient cid cmodel in Switching cid newcmodel !! [cmd]
-      GoBackClient -> let (newcmodel, cmd) = goBackClient cid cmodel in ClientDebugger cid newcmodel !! [cmd]
+      PauseClient -> let (newcmodel, cmd) = pauseClient cmodel in Switching cid newcmodel !! [cmd]
+      ResumeClientFromPaused -> let (newcmodel, cmd) = resumeClientFromPaused cmodel in Switching cid newcmodel !! [cmd]
+      ResumeClientFromPrevious prev -> let (newcmodel, cmd) = resumeClientFromPrevious prev cmodel in Switching cid newcmodel !! [cmd]
       _ -> model !! []
 
     HandleStartDebugView result -> case result of
@@ -351,9 +351,9 @@ wrapUpdate update = \msg model -> case model of
 
     OnSocketMsg data -> case (fromJSONString data) of
       SetServerModel serverModel -> ServerDebugger cid serverModel cmodel !! []
-      PauseClient -> let (newcmodel, cmd) = pauseClient cid cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
-      ResumeClient -> let (newcmodel, cmd) = resumeClient cid cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
-      GoBackClient -> let (newcmodel, cmd) = goBackClient cid cmodel in ClientDebugger cid newcmodel !! [cmd]
+      PauseClient -> let (newcmodel, cmd) = pauseClient cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
+      ResumeClientFromPaused -> let (newcmodel, cmd) = resumeClientFromPaused cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
+      ResumeClientFromPrevious prev -> let (newcmodel, cmd) = resumeClientFromPrevious prev cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
       _ -> model !! []
 
     Pause -> model !! [performOnServer PauseDebugger]
@@ -370,38 +370,33 @@ wrapUpdate update = \msg model -> case model of
       _ -> ClientDebugger cid cmodel !! []
     _ -> model !! []
 
-pauseClient : ClientId -> ClientDebuggerModel model msg remoteServerMsg -> (ClientDebuggerModel model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
-pauseClient cid cmodel = case cmodel.state of
-  Running -> let newcmodel = { cmodel | state = Paused } in
-    newcmodel !! []
-  _ -> cmodel !! []
+pauseClient : ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
+pauseClient cmodel = { cmodel | state = ClientPaused } !! []
 
-resumeClient : ClientId -> ClientDebuggerModel model msg remoteServerMsg -> (ClientDebuggerModel model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
-resumeClient cid cmodel = case cmodel.state of
-  Paused -> let newcmodel = { cmodel | state = Running } in
-    newcmodel !! []
-  _ -> cmodel !! []
+resumeClientFromPaused : ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
+resumeClientFromPaused cmodel = { cmodel | state = ClientRunning } !! []
 
-goBackClient : ClientId -> ClientDebuggerModel model msg remoteServerMsg -> (ClientDebuggerModel model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
-goBackClient cid cmodel = case cmodel.state of
-  Running -> cmodel !! []
-  Paused -> cmodel !! []
+resumeClientFromPrevious : Maybe (ClientId, (model,(MultitierCmd remoteServerMsg msg))) -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
+resumeClientFromPrevious prev cmodel = case prev of
+  Just (_,(prevModel,prevCmd)) -> { cmodel | state = ClientRunning, appModel = prevModel } !! [Multitier.map RemoteServerAppMsg AppMsg prevCmd]
+  _ -> { cmodel | state = ClientUnvalid } !! []
 
-updateAppModel : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> msg -> ClientId -> ClientDebuggerModel model msg remoteServerMsg -> (ClientDebuggerModel model msg remoteServerMsg, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
+
+updateAppModel : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> msg -> ClientId -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
 updateAppModel update appMsg cid cmodel =
   case cmodel.state of
-    Running ->
+    ClientRunning ->
       let (newAppModel, newCmd) = update appMsg cmodel.appModel in
         { cmodel | appModel = newAppModel } !! [Multitier.map RemoteServerAppMsg AppMsg newCmd, performOnServer (AddClientEvent cid (MsgEvent appMsg) newAppModel newCmd)]
-    Paused -> cmodel !! []
+    _ -> cmodel !! []
 
 -- SUBSCRIPTIONS
 
 wrapSubscriptions : (model -> Sub msg) -> (Model model msg serverModel serverMsg remoteServerMsg -> Sub (Msg model msg serverModel serverMsg remoteServerMsg))
 wrapSubscriptions subscriptions = \model ->
   let appSubs = \cmodel -> case cmodel.state of
-    Running -> Sub.map AppMsg (subscriptions cmodel.appModel)
-    Paused -> Sub.none
+    ClientRunning -> Sub.map AppMsg (subscriptions cmodel.appModel)
+    _ -> Sub.none
   in let subs = case model of
     Uninitialized _ -> Sub.none
     ClientDebugger cid cmodel -> appSubs cmodel
@@ -429,7 +424,6 @@ resumeToString resume = case resume of
 wrapView : (model -> Html msg) -> (Model model msg serverModel serverMsg remoteServerMsg -> Html (Msg model msg serverModel serverMsg remoteServerMsg))
 wrapView appView = \model -> case model of
   Uninitialized _ -> Html.text "Registering on server..."
-
   ClientDebugger _ cmodel ->
     let view divAtt =
       Html.div [] [
@@ -438,16 +432,15 @@ wrapView appView = \model -> case model of
         Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
           Html.button [onClick SwitchDebugger] [Html.text "Switch to server debugger"],
           Html.pre [] [
-            Html.text (toString (case cmodel.previous of
-              Just previous -> previous.appModel
-              _ -> cmodel.appModel))]
+            Html.text (toString cmodel.appModel)]
           --,eventsView cmodel
           ]]
       in case cmodel.state of
-        Running ->
+        ClientRunning ->
           view []
-        Paused ->
+        ClientPaused ->
           view [disabled True, style [("opacity", "0.25")]]
+        ClientUnvalid -> Html.text "Client is not valid anymore... Refresh to start a new client session."
 
   Switching cid smodel -> Html.text "Switching to server debugger..."
 
