@@ -249,7 +249,7 @@ wrapServerSubscriptions serverSubscriptions =
   \serverModel ->
     let appSubs = case serverModel.debugger.state of
       Running -> Sub.map ServerAppMsg (serverSubscriptions serverModel.debugger.appModel)
-      Paused -> Sub.none
+      Paused -> Sub.map ServerAppMsg (serverSubscriptions serverModel.debugger.appModel)
     in Sub.batch [appSubs, ServerWebSocket.keepAliveAndMonitor socketPath OnClientConnect OnClientDisconnect]
 
 -- MODEL
@@ -403,6 +403,7 @@ wrapSubscriptions : (model -> Sub msg) -> (Model model msg serverModel serverMsg
 wrapSubscriptions subscriptions = \model ->
   let appSubs = \cmodel -> case cmodel.state of
     ClientRunning -> Sub.map AppMsg (subscriptions cmodel.appModel)
+    ClientPaused -> Sub.map AppMsg (subscriptions cmodel.appModel)
     _ -> Sub.none
   in let subs = case model of
     Uninitialized _ -> Sub.none
