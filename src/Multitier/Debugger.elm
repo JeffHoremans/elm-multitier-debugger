@@ -305,7 +305,7 @@ wrapUpdate update = \msg model -> case model of
           True -> ClientDebuggerModel ClientPaused appModel 0
           False -> ClientDebuggerModel ClientRunning appModel 0 in
             let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds initData.cid newcmodel cmd in
-              ClientDebugger initData.cid rpcWrappedModel !! [rpcWrappedCmds, performOnServer (AddClientEvent initData.cid rpcWrappedModel.rpccounter (Init rpcIds) appModel cmd) ]
+              ClientDebugger initData.cid rpcWrappedModel !! [rpcWrappedCmds, performOnServer (AddClientEvent initData.cid newcmodel.rpccounter (Init rpcIds) appModel cmd) ]
       _ -> model !! []
     _ -> model !! []
 
@@ -387,7 +387,7 @@ updateAppModel update appMsg cid cmodel =
     ClientRunning ->
       let (newAppModel, newCmd) = update appMsg cmodel.appModel in
         let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds cid cmodel newCmd in
-          { rpcWrappedModel | appModel = newAppModel } !! [rpcWrappedCmds, performOnServer (AddClientEvent cid rpcWrappedModel.rpccounter (MsgEvent rpcIds appMsg) newAppModel newCmd)]
+          { rpcWrappedModel | appModel = newAppModel } !! [rpcWrappedCmds, performOnServer (AddClientEvent cid cmodel.rpccounter (MsgEvent rpcIds appMsg) newAppModel newCmd)]
     _ -> cmodel !! []
 
 wrapRPCcmds : ClientId -> ClientDebuggerModel model -> MultitierCmd remoteServerMsg msg -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg), List Int)
