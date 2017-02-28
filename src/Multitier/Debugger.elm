@@ -376,8 +376,8 @@ resumeClientFromPaused cmodel = { cmodel | state = ClientRunning } !! []
 
 resumeClientFromPrevious : ClientId -> Maybe (ClientId, (model,(MultitierCmd remoteServerMsg msg), Int)) -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
 resumeClientFromPrevious cid prev cmodel = case prev of
-  Just (_,(prevModel,prevCmd, prevCounter)) -> let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds cid cmodel prevCmd in
-    { rpcWrappedModel | state = ClientRunning, appModel = prevModel, rpccounter = prevCounter } !! [rpcWrappedCmds]
+  Just (_,(prevModel,prevCmd, prevCounter)) -> let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds cid { cmodel | rpccounter = prevCounter} prevCmd in
+    { rpcWrappedModel | state = ClientRunning, appModel = prevModel } !! [rpcWrappedCmds]
   _ -> { cmodel | state = ClientUnvalid } !! []
 
 
