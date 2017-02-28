@@ -489,15 +489,22 @@ timelineView smodel =
           ClientEvent cid clientEvent ->
             let clientIndex = Maybe.withDefault 0 (Dict.get (toString cid) clientIndices) in
               let circle = Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((clientIndex * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] [] in
-                let rpcIds = case clientEvent of
-                  Init ids -> ids
-                  MsgEvent _ ids _ -> ids in
+                let (maybeRPCid, rpcIds) = case clientEvent of
+                  Init ids -> (Maybe.Nothing, ids)
+                  MsgEvent id ids _ -> (id,ids) in
                     let rpcLines = rpcIds |> List.map (\rpcid ->
                       let serverEventIndex = EventStream.getRPCeventIndex cid rpcid smodel.events in
                         case serverEventIndex of
                           Just serverIndex -> [Svg.line [x1 (toString ((index * eventSpacing) + offset )), y1 (toString ((clientIndex * 40) + 60)), x2 (toString ((serverIndex * eventSpacing) + offset )), y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []]
                           _ -> []) in
-                      circle :: (List.concat rpcLines))
+                            case maybeRPCid of
+                              Just msgRPCid -> let rpcLine = let serverEventIndex = EventStream.getRPCeventIndex cid msgRPCid smodel.events in
+                                case serverEventIndex of
+                                  Just serverIndex -> [Svg.line [x1 (toString ((index * eventSpacing) + offset )) , y1 (toString ((clientIndex * 40) + 60)), x2 (toString ((serverIndex * eventSpacing) + offset )), y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []]
+                                  _ -> [] in
+                                circle :: (List.append rpcLine (List.concat rpcLines))
+                              _ -> circle :: (List.concat rpcLines))
+
         |> List.concat
 
 
