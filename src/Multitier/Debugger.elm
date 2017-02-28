@@ -34,7 +34,7 @@ type ServerDebuggerState = Running | Paused
 type alias PreviousState serverModel serverCmd model cmd =
   { appModel : serverModel
   , cmd : serverCmd
-  , clients : Dict String (ClientId, (model,cmd))
+  , clients : Dict String (ClientId, (model,cmd, Int))
   , index : Int }
 
 -- PROGRAM
@@ -166,7 +166,7 @@ type RemoteServerMsg remoteServerMsg model msg =
   PauseDebugger | ResumeDebugger | GoBackDebugger Int |
   SetDebuggerResumeStrategy ResumeStrategy |
 
-  AddClientEvent ClientId (ClientEventType msg) model (MultitierCmd remoteServerMsg msg)
+  AddClientEvent ClientId Int (ClientEventType msg) model (MultitierCmd remoteServerMsg msg)
 
 wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg model msg -> RPC (ServerModel serverModel serverMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) (ServerMsg serverMsg))
 wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
@@ -178,11 +178,11 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
     rpc HandleStopDebugView (\serverModel -> let clients = serverModel.clients in
       ({ serverModel | clients = { clients | debugging = Dict.remove (toString cid) clients.debugging }}, Task.succeed (), Cmd.none))
 
-  AddClientEvent cid event model cmd -> rpc Handle
+  AddClientEvent cid rpcid event model cmd -> rpc Handle
     (\serverModel -> let debugger = serverModel.debugger in
       case debugger.state of
         Running ->
-          let newServerModel = { serverModel | debugger = { debugger | events = EventStream.pushClientEvent cid (event,model,cmd) debugger.events }} in
+          let newServerModel = { serverModel | debugger = { debugger | events = EventStream.pushClientEvent cid rpcid (event,model,cmd) debugger.events }} in
             (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
         Paused -> (serverModel, Task.succeed (), Cmd.none)) -- TODO what to do in this case?
 
@@ -291,7 +291,7 @@ type SocketMsg serverModel serverMsg remoteServerMsg model msg =
   InitializeClient InitData |
   SetServerModel (ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg) |
 
-  PauseClient | ResumeClientFromPaused | ResumeClientFromPrevious (Maybe (ClientId, (model,(MultitierCmd remoteServerMsg msg))))
+  PauseClient | ResumeClientFromPaused | ResumeClientFromPrevious (Maybe (ClientId, (model,(MultitierCmd remoteServerMsg msg), Int)))
 
 -- TODO split in submodules
 
@@ -305,7 +305,7 @@ wrapUpdate update = \msg model -> case model of
           True -> ClientDebuggerModel ClientPaused appModel 0
           False -> ClientDebuggerModel ClientRunning appModel 0 in
             let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds initData.cid newcmodel cmd in
-              ClientDebugger initData.cid rpcWrappedModel !! [rpcWrappedCmds, performOnServer (AddClientEvent initData.cid (Init rpcIds) appModel cmd) ]
+              ClientDebugger initData.cid rpcWrappedModel !! [rpcWrappedCmds, performOnServer (AddClientEvent initData.cid rpcWrappedModel.rpccounter (Init rpcIds) appModel cmd) ]
       _ -> model !! []
     _ -> model !! []
 
@@ -374,10 +374,10 @@ pauseClient cmodel = { cmodel | state = ClientPaused } !! []
 resumeClientFromPaused : ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
 resumeClientFromPaused cmodel = { cmodel | state = ClientRunning } !! []
 
-resumeClientFromPrevious : ClientId -> Maybe (ClientId, (model,(MultitierCmd remoteServerMsg msg))) -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
+resumeClientFromPrevious : ClientId -> Maybe (ClientId, (model,(MultitierCmd remoteServerMsg msg), Int)) -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
 resumeClientFromPrevious cid prev cmodel = case prev of
-  Just (_,(prevModel,prevCmd)) -> let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds cid cmodel prevCmd in
-    { rpcWrappedModel | state = ClientRunning, appModel = prevModel } !! [rpcWrappedCmds]
+  Just (_,(prevModel,prevCmd, prevCounter)) -> let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds cid cmodel prevCmd in
+    { rpcWrappedModel | state = ClientRunning, appModel = prevModel, rpccounter = prevCounter } !! [rpcWrappedCmds]
   _ -> { cmodel | state = ClientUnvalid } !! []
 
 
@@ -387,7 +387,7 @@ updateAppModel update appMsg cid cmodel =
     ClientRunning ->
       let (newAppModel, newCmd) = update appMsg cmodel.appModel in
         let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds cid cmodel newCmd in
-          { rpcWrappedModel | appModel = newAppModel } !! [rpcWrappedCmds, performOnServer (AddClientEvent cid (MsgEvent rpcIds appMsg) newAppModel newCmd)]
+          { rpcWrappedModel | appModel = newAppModel } !! [rpcWrappedCmds, performOnServer (AddClientEvent cid rpcWrappedModel.rpccounter (MsgEvent rpcIds appMsg) newAppModel newCmd)]
     _ -> cmodel !! []
 
 wrapRPCcmds : ClientId -> ClientDebuggerModel model -> MultitierCmd remoteServerMsg msg -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg), List Int)
