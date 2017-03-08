@@ -1,6 +1,7 @@
 module Multitier.Debugger.TimeLine
   exposing
     ( TimeLine
+    , RunCycleID
     , Event(..)
     , ServerEventType(..)
     , ClientEventType(..)
@@ -29,8 +30,10 @@ type alias Model serverModel serverMsg remoteServerMsg model msg =
   , rpcindices : Dict (String,Int) Int }
 
 type Event serverMsg remoteServerMsg msg =
-  ServerEvent (ServerEventType serverMsg remoteServerMsg) |
-  ClientEvent ClientId (ClientEventType msg)
+  ServerEvent RunCycleID (ServerEventType serverMsg remoteServerMsg) |
+  ClientEvent ClientId RunCycleID (ClientEventType msg)
+
+type alias RunCycleID = Int
 
 type ClientEventType msg = Init (List Int) | MsgEvent (Maybe Int) (List Int) msg
 type ServerEventType serverMsg remoteServerMsg = InitServer | ServerMsgEvent serverMsg | RPCevent ClientId Int remoteServerMsg
@@ -46,19 +49,19 @@ getRPCeventIndex cid rpcid (TimeLine {rpcindices}) = Dict.get ((toString cid),rp
 empty : (serverModel, Cmd serverMsg) -> TimeLine serverModel serverMsg remoteServerMsg model msg
 empty serverState = TimeLine (Model Array.empty serverState Dict.empty Dict.empty)
 
-pushServerEvent : ((ServerEventType serverMsg remoteServerMsg), serverModel, Cmd serverMsg) -> TimeLine serverModel serverMsg remoteServerMsg model msg -> TimeLine serverModel serverMsg remoteServerMsg model msg
-pushServerEvent (serverEvent, serverModel, serverCmd) (TimeLine {timeline, clients, rpcindices}) =
+pushServerEvent : RunCycleID -> ((ServerEventType serverMsg remoteServerMsg), serverModel, Cmd serverMsg) -> TimeLine serverModel serverMsg remoteServerMsg model msg -> TimeLine serverModel serverMsg remoteServerMsg model msg
+pushServerEvent rcid (serverEvent, serverModel, serverCmd) (TimeLine {timeline, clients, rpcindices}) =
   let newServer = (serverModel, serverCmd)
       newRPCindices = case serverEvent of
         RPCevent cid rpcid _ -> Dict.insert ((toString cid),rpcid) (Array.length timeline) rpcindices
         _ -> rpcindices in
-  let newTimeline = Array.push (ServerEvent serverEvent, EventRecoveryState (serverModel, serverCmd) clients newRPCindices) timeline in
+  let newTimeline = Array.push (ServerEvent rcid serverEvent, EventRecoveryState (serverModel, serverCmd) clients newRPCindices) timeline in
     TimeLine (Model newTimeline newServer clients newRPCindices)
 
-pushClientEvent : ClientId -> Int -> ((ClientEventType msg), model, MultitierCmd remoteServerMsg msg) -> TimeLine serverModel serverMsg remoteServerMsg model msg -> TimeLine serverModel serverMsg remoteServerMsg model msg
-pushClientEvent cid rpcid (clientEvent, model, cmd) (TimeLine {timeline, server, clients, rpcindices}) =
+pushClientEvent : ClientId -> RunCycleID -> Int -> ((ClientEventType msg), model, MultitierCmd remoteServerMsg msg) -> TimeLine serverModel serverMsg remoteServerMsg model msg -> TimeLine serverModel serverMsg remoteServerMsg model msg
+pushClientEvent cid rcid rpcid (clientEvent, model, cmd) (TimeLine {timeline, server, clients, rpcindices}) =
   let newClients = Dict.insert (toString cid) (cid, (model, cmd, rpcid)) clients
-      newTimeline = Array.push (ClientEvent cid clientEvent, EventRecoveryState server newClients rpcindices) timeline in
+      newTimeline = Array.push (ClientEvent cid rcid clientEvent, EventRecoveryState server newClients rpcindices) timeline in
     TimeLine (Model newTimeline server newClients rpcindices)
 
 previousState : Int -> TimeLine serverModel serverMsg remoteServerMsg model msg -> (serverModel, Cmd serverMsg, Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg, Int)))
