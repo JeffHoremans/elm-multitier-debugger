@@ -22,7 +22,7 @@ import Multitier.Error exposing (Error)
 import Multitier.Server.WebSocket as ServerWebSocket exposing (ClientId)
 import Multitier.LowLevel exposing (toJSON, fromJSONString)
 
-import Multitier.Debugger.EventStream as EventStream exposing (EventStream, Event(..), ServerEventType(..), ClientEventType(..))
+import Multitier.Debugger.TimeLine as TimeLine exposing (TimeLine, Event(..), ServerEventType(..), ClientEventType(..))
 
 type ResumeStrategy = FromPrevious | FromPaused
 
@@ -75,7 +75,7 @@ type alias ServerModel serverModel serverMsg remoteServerMsg model msg =
 type alias ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg =
   { state: ServerDebuggerState
   , appModel : serverModel
-  , events : EventStream serverModel serverMsg remoteServerMsg model msg
+  , timeline : TimeLine serverModel serverMsg remoteServerMsg model msg
   , previous : Maybe (PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg))
   , resume : ResumeStrategy
   , clientIds : List String }
@@ -88,7 +88,7 @@ wrapInitServer (serverModel, cmd) =
   { debugger =
     { state = Running
     , appModel = serverModel
-    , events = EventStream.empty (serverModel, cmd) |> EventStream.pushServerEvent (InitServer, serverModel, cmd)
+    , timeline = TimeLine.empty (serverModel, cmd) |> TimeLine.pushServerEvent (InitServer, serverModel, cmd)
     , previous = Maybe.Nothing
     , resume = FromPaused
     , clientIds = [] }
@@ -108,7 +108,7 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
       case serverModel.debugger.state of
         Running ->
           let (newAppModel, cmd) = updateServer serverAppMsg debugger.appModel in
-            { serverModel | debugger = { debugger | appModel = newAppModel, events = EventStream.pushServerEvent ((ServerMsgEvent serverAppMsg), newAppModel, cmd) debugger.events }} ! [Cmd.map ServerAppMsg cmd]
+            { serverModel | debugger = { debugger | appModel = newAppModel, timeline = TimeLine.pushServerEvent ((ServerMsgEvent serverAppMsg), newAppModel, cmd) debugger.timeline }} ! [Cmd.map ServerAppMsg cmd]
         Paused -> serverModel ! []
 
     OnClientConnect cid ->
@@ -144,7 +144,7 @@ broadcastResumeFromPausedAction = broadcastSocketMsg ResumeClientFromPaused
 
 broadcastResumeFromPreviousAction : PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg) -> ServerModel serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
 broadcastResumeFromPreviousAction previous serverModel =
-  EventStream.clients serverModel.debugger.events
+  TimeLine.clients serverModel.debugger.timeline
     |> List.map (\cid -> case Dict.member (toString cid) previous.clients of
         True -> sendSocketMsg cid (ResumeClientFromPrevious (Dict.get (toString cid) previous.clients))
         False -> sendSocketMsg cid (ResumeClientFromPrevious Maybe.Nothing))
@@ -182,7 +182,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
     (\serverModel -> let debugger = serverModel.debugger in
       case debugger.state of
         Running ->
-          let newServerModel = { serverModel | debugger = { debugger | events = EventStream.pushClientEvent cid rpcid (event,model,cmd) debugger.events }} in
+          let newServerModel = { serverModel | debugger = { debugger | timeline = TimeLine.pushClientEvent cid rpcid (event,model,cmd) debugger.timeline }} in
             (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
         Paused -> (serverModel, Task.succeed (), Cmd.none)) -- TODO what to do in this case?
 
@@ -204,7 +204,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
               Just previous ->
                 { serverModel | debugger = { debugger | state = Running
                                                       , appModel = previous.appModel
-                                                      , events = EventStream.goBack previous.index debugger.events
+                                                      , timeline = TimeLine.goBack previous.index debugger.timeline
                                                       , previous = Maybe.Nothing }} ! [Cmd.map ServerAppMsg previous.cmd, broadcastResumeFromPreviousAction previous serverModel]
               _ -> { serverModel | debugger = { debugger | state = Running }} ! [broadcastResumeFromPausedAction] in
            (newServerModel, Task.succeed (), Cmd.batch [newServerCmd, sendDebuggerModel newServerModel])
@@ -216,9 +216,9 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
     (\serverModel ->
       let debugger = serverModel.debugger in
         let (newServerModel, newCmd) =
-          case (index == EventStream.length debugger.events) of
+          case (index == TimeLine.length debugger.timeline) of
             True -> { serverModel | debugger = { debugger | previous = Maybe.Nothing }} ! []
-            False -> let (previousAppModel, previousCmd, previousClients) = (EventStream.previousState index debugger.events) in
+            False -> let (previousAppModel, previousCmd, previousClients) = (TimeLine.previousState index debugger.timeline) in
               { serverModel | debugger = { debugger | previous = (Just (PreviousState previousAppModel previousCmd previousClients index)) }} ! []
           in (newServerModel, Task.succeed (), Cmd.batch [newCmd, sendDebuggerModel newServerModel]))
 
@@ -229,7 +229,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
         let debugger = serverModel.debugger in
           case debugger.state of
             Running ->
-              let newServerModel = { serverModel | debugger = { debugger | appModel = appModel, events = EventStream.pushServerEvent (RPCevent cid rpcid msg, appModel, Cmd.none) debugger.events }} in
+              let newServerModel = { serverModel | debugger = { debugger | appModel = appModel, timeline = TimeLine.pushServerEvent (RPCevent cid rpcid msg, appModel, Cmd.none) debugger.timeline }} in
                 newServerModel ! [sendDebuggerModel newServerModel]
             Paused -> serverModel ! [])
           (\serverModel -> serverModel.debugger.appModel)
@@ -472,17 +472,17 @@ wrapView appView = \model -> case model of
 timelineView : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 timelineView smodel =
   let
-    clients = EventStream.clients smodel.events |> List.indexedMap (\index cid -> ((toString cid), index)) in
+    clients = TimeLine.clients smodel.timeline |> List.indexedMap (\index cid -> ((toString cid), index)) in
   let
     clientIndices = clients |> Dict.fromList in
   let
     previousIndex = case smodel.previous of
       Just previous -> previous.index
-      _ -> (EventStream.length smodel.events) - 1
+      _ -> (TimeLine.length smodel.timeline) - 1
     offset = 10
     eventSpacing = 25
     circles =
-      EventStream.view smodel.events
+      TimeLine.view smodel.timeline
         |> List.map (\(index, event) -> case event of
           ServerEvent serverEvent ->
             [Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] []]
@@ -493,12 +493,12 @@ timelineView smodel =
                   Init ids -> (Maybe.Nothing, ids)
                   MsgEvent id ids _ -> (id,ids) in
                     let rpcLines = rpcIds |> List.map (\rpcid ->
-                      let serverEventIndex = EventStream.getRPCeventIndex cid rpcid smodel.events in
+                      let serverEventIndex = TimeLine.getRPCeventIndex cid rpcid smodel.timeline in
                         case serverEventIndex of
                           Just serverIndex -> [Svg.line [x1 (toString ((index * eventSpacing) + offset )), y1 (toString ((clientIndex * 40) + 60)), x2 (toString ((serverIndex * eventSpacing) + offset )), y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []]
                           _ -> []) in
                             case maybeRPCid of
-                              Just msgRPCid -> let rpcLine = let serverEventIndex = EventStream.getRPCeventIndex cid msgRPCid smodel.events in
+                              Just msgRPCid -> let rpcLine = let serverEventIndex = TimeLine.getRPCeventIndex cid msgRPCid smodel.timeline in
                                 case serverEventIndex of
                                   Just serverIndex -> [Svg.line [x1 (toString ((index * eventSpacing) + offset )) , y1 (toString ((clientIndex * 40) + 60)), x2 (toString ((serverIndex * eventSpacing) + offset )), y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []]
                                   _ -> [] in
@@ -514,7 +514,7 @@ timelineView smodel =
         |> List.map (\(_,index) -> Svg.line [x1 (toString offset), y1 (toString ((index * 40) + 60)), x2 "100%", y2 (toString ((index * 40) + 60)), style [("stroke", "black"), ("stroke-width", "3")]] [])
   in
   Html.div [id "timeline", style [("overflow-x", "auto")]] [
-    Svg.svg [ width (toString ((((EventStream.length smodel.events) - 1) * eventSpacing) + (offset * 2))), height (toString (40 * ((EventStream.numberOfClients smodel.events) + 1)))]
+    Svg.svg [ width (toString ((((TimeLine.length smodel.timeline) - 1) * eventSpacing) + (offset * 2))), height (toString (40 * ((TimeLine.numberOfClients smodel.timeline) + 1)))]
       (List.concat [
         [serverLine],
         clientLines,
@@ -525,8 +525,8 @@ eventsView smodel =
   let
     previousIndex = case smodel.previous of
       Just previous -> previous.index
-      _ -> (EventStream.length smodel.events) - 1
-    options = EventStream.view smodel.events
+      _ -> (TimeLine.length smodel.timeline) - 1
+    options = TimeLine.view smodel.timeline
       |> List.map (\(index, event) -> Html.option [onClick (GoBack index), selected (previousIndex == index)] [Html.text (eventView event)])
       |> List.reverse
   in Html.div [] [
