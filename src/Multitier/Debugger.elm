@@ -263,7 +263,8 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
             Running ->
               let newServerModel = { serverModel | debugger = { debugger | appModel = appModel
                                                                          , timeline = TimeLine.pushServerEvent (RPCevent cid rpcid msg, appModel, Cmd.none) debugger.timeline
-                                                                         , msgCount = debugger.msgCount + 1 }} in
+                                                                        --  , msgCount = debugger.msgCount + 1
+                                                                        }} in
                 newServerModel ! [sendDebuggerModel newServerModel]
             Paused -> serverModel ! []) --
           (\serverModel -> serverModel.debugger.appModel)
