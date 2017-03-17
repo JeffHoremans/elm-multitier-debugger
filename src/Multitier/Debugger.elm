@@ -343,8 +343,8 @@ wrapUpdate update = \msg model -> case model of
         let msgCount = 0
             rpcCount = 0 in
           let newcmodel = case initData.paused of
-            True -> ClientDebuggerModel ClientPaused appModel rpcCount msgCount
-            False -> ClientDebuggerModel ClientRunning appModel rpcCount msgCount in
+            True -> ClientDebuggerModel ClientPaused appModel rpcCount (msgCount + 1)
+            False -> ClientDebuggerModel ClientRunning appModel rpcCount (msgCount + 1) in
               let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds initData.cid (RegularMsg msgCount) newcmodel cmd in
                 ClientDebugger initData.cid rpcWrappedModel !! [rpcWrappedCmds, performOnServer (AddClientEvent initData.cid newcmodel.rpccounter (Init rpcIds) appModel cmd) ]
       _ -> model !! []
