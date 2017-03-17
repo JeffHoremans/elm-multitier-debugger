@@ -4,8 +4,10 @@ module Multitier.Debugger.TimeLine
     , Event(..)
     , ServerEventType(..)
     , ServerMsgType(..)
+    , ParentServerMsg(..)
     , ClientEventType(..)
     , ClientMsgType(..)
+    , ParentMsg(..)
     , empty
     , pushServerEvent
     , pushClientEvent
@@ -26,8 +28,8 @@ type TimeLine serverModel serverMsg remoteServerMsg model msg = TimeLine (Model 
 
 type alias Model serverModel serverMsg remoteServerMsg model msg =
   { timeline : Array (Event serverMsg remoteServerMsg msg, EventRecoveryState serverModel serverMsg remoteServerMsg model msg)
-  , server : (serverModel, Cmd serverMsg, Int, Int)
-  , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg, Int, Int))
+  , server : (serverModel, Cmd serverMsg, ParentServerMsg, Int, Int)
+  , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg, ParentMsg, Int, Int))
   , rpcindices : Dict (String,Int) Int }
 
 type Event serverMsg remoteServerMsg msg =
@@ -40,6 +42,10 @@ type ClientMsgType =
   NewClientMsg Int |
   ClientChildMsg Int Int
 
+type ParentMsg =
+  NoParentMsg |
+  RegularMsg Int
+
 type ServerEventType serverMsg remoteServerMsg =
   InitServerEvent |
   ServerMsgEvent ServerMsgType serverMsg |
@@ -51,37 +57,43 @@ type ServerMsgType =
   RPCserverMsg ClientId Int Int |
   RPCchildServerMsg (ClientId,Int,Int) Int
 
+type ParentServerMsg =
+  None |
+  RegularServerMsg Int |
+  ServerRPC ClientId Int |
+  ServerRPCmsg (ClientId,Int,Int)
+
 type alias EventRecoveryState serverModel serverMsg remoteServerMsg model msg =
-  { server : (serverModel, Cmd serverMsg, Int, Int)
-  , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg, Int, Int))
+  { server : (serverModel, Cmd serverMsg, ParentServerMsg, Int, Int)
+  , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg, ParentMsg, Int, Int))
   , rpcindices : Dict (String,Int) Int }
 
 getRPCeventIndex : ClientId -> Int -> TimeLine serverModel serverMsg remoteServerMsg model msg -> Maybe Int
 getRPCeventIndex cid rpcid (TimeLine {rpcindices}) = Dict.get ((toString cid),rpcid) rpcindices
 
-empty : (serverModel, Cmd serverMsg, Int, Int) -> TimeLine serverModel serverMsg remoteServerMsg model msg
-empty serverState = TimeLine (Model Array.empty serverState Dict.empty Dict.empty)
+empty : serverModel -> TimeLine serverModel serverMsg remoteServerMsg model msg
+empty serverModel = TimeLine (Model Array.empty (serverModel,Cmd.none,None,0,0) Dict.empty Dict.empty)
 
-pushServerEvent : Int -> Int -> ((ServerEventType serverMsg remoteServerMsg), serverModel, Cmd serverMsg) -> TimeLine serverModel serverMsg remoteServerMsg model msg -> TimeLine serverModel serverMsg remoteServerMsg model msg
-pushServerEvent rpcMsgCount msgCount (serverEvent, serverModel, serverCmd) (TimeLine {timeline, clients, rpcindices}) =
-  let newServer = (serverModel, serverCmd, rpcMsgCount, msgCount)
+pushServerEvent : Int -> Int -> ((ServerEventType serverMsg remoteServerMsg), serverModel, Cmd serverMsg, ParentServerMsg) -> TimeLine serverModel serverMsg remoteServerMsg model msg -> TimeLine serverModel serverMsg remoteServerMsg model msg
+pushServerEvent rpcMsgCount msgCount (serverEvent, serverModel, serverCmd, parentMsg) (TimeLine {timeline, clients, rpcindices}) =
+  let newServer = (serverModel, serverCmd, parentMsg, rpcMsgCount, msgCount)
       newRPCindices = case serverEvent of
         ServerRPCevent cid rpcid _ -> Dict.insert ((toString cid), rpcid) (Array.length timeline) rpcindices
         _ -> rpcindices in
   let newTimeline = Array.push (ServerEvent serverEvent, EventRecoveryState newServer clients newRPCindices) timeline in
     TimeLine (Model newTimeline newServer clients newRPCindices)
 
-pushClientEvent : ClientId -> Int -> Int -> ((ClientEventType msg), model, MultitierCmd remoteServerMsg msg) -> TimeLine serverModel serverMsg remoteServerMsg model msg -> TimeLine serverModel serverMsg remoteServerMsg model msg
-pushClientEvent cid rpcCount msgCount (clientEvent, model, cmd) (TimeLine {timeline, server, clients, rpcindices}) =
-  let newClients = Dict.insert (toString cid) (cid, (model, cmd, rpcCount, msgCount)) clients
+pushClientEvent : ClientId -> Int -> Int -> ((ClientEventType msg), model, MultitierCmd remoteServerMsg msg, ParentMsg) -> TimeLine serverModel serverMsg remoteServerMsg model msg -> TimeLine serverModel serverMsg remoteServerMsg model msg
+pushClientEvent cid rpcCount msgCount (clientEvent, model, cmd, parentMsg) (TimeLine {timeline, server, clients, rpcindices}) =
+  let newClients = Dict.insert (toString cid) (cid, (model, cmd, parentMsg, rpcCount, msgCount)) clients
       newTimeline = Array.push (ClientEvent cid clientEvent, EventRecoveryState server newClients rpcindices) timeline in
     TimeLine (Model newTimeline server newClients rpcindices)
 
-previousState : Int -> TimeLine serverModel serverMsg remoteServerMsg model msg -> (serverModel, Cmd serverMsg, Int, Int, Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg, Int, Int)))
+previousState : Int -> TimeLine serverModel serverMsg remoteServerMsg model msg -> (serverModel, Cmd serverMsg, ParentServerMsg, Int, Int, Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg, ParentMsg, Int, Int)))
 previousState index (TimeLine {timeline, server}) =
   case Array.get index timeline of
-    Just (_, recoveryState) -> let (serverModel, serverCmd, rpcMsgCount, msgCount) = recoveryState.server in (serverModel, serverCmd, rpcMsgCount, msgCount, recoveryState.clients)
-    _ -> let (serverModel, serverCmd, rpcMsgCount, msgCount) = server in (serverModel, serverCmd, rpcMsgCount, msgCount, Dict.empty)
+    Just (_, recoveryState) -> let (serverModel, serverCmd, parentMsg, rpcMsgCount, msgCount) = recoveryState.server in (serverModel, serverCmd, parentMsg, rpcMsgCount, msgCount, recoveryState.clients)
+    _ -> let (serverModel, serverCmd, parentMsg, rpcMsgCount, msgCount) = server in (serverModel, serverCmd, parentMsg, rpcMsgCount, msgCount, Dict.empty)
 
 previousRecoveryState : Int -> TimeLine serverModel serverMsg remoteServerMsg model msg -> EventRecoveryState serverModel serverMsg remoteServerMsg model msg
 previousRecoveryState index (TimeLine {timeline, server, clients, rpcindices}) =
