@@ -2,6 +2,7 @@ module Multitier.Debugger.TimeLine
   exposing
     ( TimeLine
     , Event(..)
+    , RunCycle
     , ServerEventType(..)
     , ServerMsgType(..)
     , ParentServerMsg(..)
@@ -24,6 +25,9 @@ import Dict exposing (Dict)
 import Multitier.Server.WebSocket exposing (ClientId)
 import Multitier exposing (MultitierCmd(..))
 
+
+type alias RunCycle = Int
+
 type TimeLine serverModel serverMsg remoteServerMsg model msg = TimeLine (Model serverModel serverMsg remoteServerMsg model msg)
 
 type alias Model serverModel serverMsg remoteServerMsg model msg =
@@ -35,6 +39,11 @@ type alias Model serverModel serverMsg remoteServerMsg model msg =
 type Event serverMsg remoteServerMsg msg =
   ServerEvent (ServerEventType serverMsg remoteServerMsg) |
   ClientEvent ClientId (ClientEventType msg)
+
+type alias EventRecoveryState serverModel serverMsg remoteServerMsg model msg =
+  { server : (serverModel, Cmd serverMsg, ParentServerMsg, Int, Int)
+  , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg, ParentMsg, Int, Int))
+  , rpcindices : Dict (String,Int) Int }
 
 type ClientEventType msg = Init (List Int) | MsgEvent ClientMsgType (Maybe Int) (List Int) msg
 
@@ -62,11 +71,6 @@ type ParentServerMsg =
   RegularServerMsg Int |
   ServerRPC ClientId Int |
   ServerRPCmsg (ClientId,Int,Int)
-
-type alias EventRecoveryState serverModel serverMsg remoteServerMsg model msg =
-  { server : (serverModel, Cmd serverMsg, ParentServerMsg, Int, Int)
-  , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg, ParentMsg, Int, Int))
-  , rpcindices : Dict (String,Int) Int }
 
 getRPCeventIndex : ClientId -> Int -> TimeLine serverModel serverMsg remoteServerMsg model msg -> Maybe Int
 getRPCeventIndex cid rpcid (TimeLine {rpcindices}) = Dict.get ((toString cid),rpcid) rpcindices
