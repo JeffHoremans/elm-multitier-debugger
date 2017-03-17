@@ -593,7 +593,10 @@ clientEventView cid event =
   case event of
     Init rpcids -> "[Init-"++ (toString cid) ++ "-" ++ (toString rpcids) ++"]"
     MsgEvent msgType maybeRPCid rpcids msg -> case maybeRPCid of
-      Just rpcid -> "[RPC-Msg-"++ (toString cid) ++"-"++ (toString rpcid) ++ "-" ++ (toString rpcids) ++"] " ++ (toString msg)
+      Just rpcid -> let msgid = case msgType of
+        NewClientMsg id -> id
+        ClientChildMsg _ id -> id in -- this case should never happen
+         "[RPC-Msg-"++ (toString cid) ++ "-" ++ (toString msgid) ++ "-" ++ (toString rpcid) ++ "-" ++ (toString rpcids) ++"] " ++ (toString msg)
       _ -> case msgType of
         NewClientMsg msgid -> "[NewMsg-"++ (toString cid) ++ "-" ++ (toString msgid) ++ "-" ++ (toString rpcids) ++"] " ++ (toString msg)
         ClientChildMsg parentid msgid -> "[ChildMsg-"++ (toString cid) ++ "-(" ++ (toString parentid) ++ "," ++ (toString msgid) ++ ")-" ++ (toString rpcids) ++"] " ++ (toString msg)
