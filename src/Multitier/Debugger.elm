@@ -234,7 +234,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
                 { serverModel | debugger = { debugger | state = Running
                                                       , appModel = previous.appModel
                                                       , timeline = TimeLine.goBack previous.index debugger.timeline
-                                                      , msgCount = previous.msgCount
+                                                      , msgCount = let test = Debug.log "previous msg count" previous.msgCount in previous.msgCount
                                                       , rpcMsgCount = previous.rpcMsgCount
                                                       , previous = Maybe.Nothing }} ! [Cmd.map (ServerAppMsg previous.parentMsg) previous.cmd, broadcastResumeFromPreviousAction previous serverModel]
               _ -> { serverModel | debugger = { debugger | state = Running }} ! [broadcastResumeFromPausedAction] in
