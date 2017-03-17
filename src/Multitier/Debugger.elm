@@ -35,8 +35,8 @@ type alias PreviousState serverModel serverCmd model cmd =
   { appModel : serverModel
   , cmd : serverCmd
   , parentMsg : ParentServerMsg
-  , msgCount : Int
   , rpcMsgCount : Int
+  , msgCount : Int
   , clients : Dict String (ClientId, (model,cmd, ParentMsg, Int, Int))
   , index : Int }
 
@@ -234,7 +234,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
                 { serverModel | debugger = { debugger | state = Running
                                                       , appModel = previous.appModel
                                                       , timeline = TimeLine.goBack previous.index debugger.timeline
-                                                      , msgCount = let test = Debug.log "previous msg count" previous.msgCount in previous.msgCount
+                                                      , msgCount = previous.msgCount
                                                       , rpcMsgCount = previous.rpcMsgCount
                                                       , previous = Maybe.Nothing }} ! [Cmd.map (ServerAppMsg previous.parentMsg) previous.cmd, broadcastResumeFromPreviousAction previous serverModel]
               _ -> { serverModel | debugger = { debugger | state = Running }} ! [broadcastResumeFromPausedAction] in
