@@ -5,6 +5,7 @@ module Multitier.Debugger.TimeLine
     , ServerEventType(..)
     , ServerMsgType(..)
     , ClientEventType(..)
+    , ClientMsgType(..)
     , empty
     , pushServerEvent
     , pushClientEvent
@@ -33,16 +34,21 @@ type Event serverMsg remoteServerMsg msg =
   ServerEvent (ServerEventType serverMsg remoteServerMsg) |
   ClientEvent ClientId (ClientEventType msg)
 
-type ClientEventType msg = Init (List Int) | MsgEvent (Maybe Int) (List Int) msg
+type ClientEventType msg = Init (List Int) | MsgEvent ClientMsgType (Maybe Int) (List Int) msg
+
+type ClientMsgType =
+  NewClientMsg Int |
+  ClientChildMsg Int Int
+
 
 type ServerEventType serverMsg remoteServerMsg =
-  InitServer Int |
+  InitServerEvent |
   ServerMsgEvent ServerMsgType serverMsg |
-  RPCevent ClientId Int remoteServerMsg
+  ServerRPCevent ClientId Int remoteServerMsg
 
 type ServerMsgType =
   NewServerMsg Int |
-  ChildServerMsg Int Int |
+  ServerChildMsg Int Int |
   RPCserverMsg ClientId Int Int |
   RPCchildServerMsg (ClientId,Int,Int) Int
 
@@ -61,7 +67,7 @@ pushServerEvent : ((ServerEventType serverMsg remoteServerMsg), serverModel, Cmd
 pushServerEvent (serverEvent, serverModel, serverCmd) (TimeLine {timeline, clients, rpcindices}) =
   let newServer = (serverModel, serverCmd)
       newRPCindices = case serverEvent of
-        RPCevent cid rpcid _ -> Dict.insert ((toString cid), rpcid) (Array.length timeline) rpcindices
+        ServerRPCevent cid rpcid _ -> Dict.insert ((toString cid), rpcid) (Array.length timeline) rpcindices
         _ -> rpcindices in
   let newTimeline = Array.push (ServerEvent serverEvent, EventRecoveryState (serverModel, serverCmd) clients newRPCindices) timeline in
     TimeLine (Model newTimeline newServer clients newRPCindices)
