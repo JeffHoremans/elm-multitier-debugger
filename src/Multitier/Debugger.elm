@@ -8,7 +8,7 @@ import Html exposing (Html)
 import Html.Attributes exposing (checked, style, disabled, size, value, type_, selected, id)
 import Html.Events exposing (onClick, onCheck, on)
 import Svg
-import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy, fill, d)
+import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy, fill, stroke, d)
 import Array exposing (Array)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
@@ -535,7 +535,7 @@ timelineView smodel =
                 let px1 = (parentIndex * eventSpacing) + offset
                     px2 = (index * eventSpacing) + offset
                     qx = px1 + ((px2 - px1) // 2) in
-                  [Svg.path [d ("M "++(toString px1)++" 20 Q "++(toString qx)++ " 5 "++(toString px2)++" 20"), style [("stroke", "black"), ("stroke-width", "1")]] []]
+                  [Svg.path [d ("M "++(toString px1)++" 20 Q "++(toString qx)++ " 0 "++(toString px2)++" 20"), stroke "black", fill "transparent"] []]
               _ -> []
             in List.append parentLine
               [Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] []]
