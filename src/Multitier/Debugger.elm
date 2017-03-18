@@ -151,7 +151,9 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
                 , timeline = TimeLine.pushServerEvent debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (RPCchildServerMsg (cid,rpcid,rpcmsgid) debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
                   ! [Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
 
-        Paused -> { serverModel | debugger = { debugger | messagesReceivedDuringPaused = Array.push (runCycle, PausedServerAppMsg updateServer parent serverAppMsg) debugger.messagesReceivedDuringPaused}} ! []
+        Paused -> case parent of
+          None -> serverModel ! []
+          _ -> { serverModel | debugger = { debugger | messagesReceivedDuringPaused = Array.push (runCycle, PausedServerAppMsg updateServer parent serverAppMsg) debugger.messagesReceivedDuringPaused}} ! []
 
     OnClientConnect cid ->
       { serverModel | debugger =  { debugger | clientIds = (toString cid) :: debugger.clientIds }} ! [initializeClient serverModel cid]
