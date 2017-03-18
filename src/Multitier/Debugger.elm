@@ -565,6 +565,9 @@ wrapView appView = \model -> case model of
             Just previous -> previous.appModel
             _ -> smodel.appModel))],
         eventsView smodel,
+        Html.pre [] [Html.text (toString (Array.map (\(runCycle,message) -> case message of
+          PausedServerAppMsg _ parent serverMsg -> ("PausedServerAppMsg parent:(" ++ (toString parent) ++")-" ++ (toString serverMsg))
+          PausedRemoteServerAppMsg cid _ rpcid remoteServerMsg -> ("PausedRemoteServerAppMsg cid:(" ++ (toString cid) ++ "," ++ (toString rpcid) ++")-" ++ (toString remoteServerMsg))) smodel.messagesReceivedDuringPaused))],
         timelineView smodel]
       in case smodel.state of
         Running ->
