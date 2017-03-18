@@ -8,7 +8,7 @@ import Html exposing (Html)
 import Html.Attributes exposing (checked, style, disabled, size, value, type_, selected, id)
 import Html.Events exposing (onClick, onCheck, on)
 import Svg
-import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy, fill, stroke, d, refX, refY, markerWidth, markerHeight, orient, markerEnd)
+import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy, fill, stroke, d)
 import Array exposing (Array)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
@@ -23,22 +23,6 @@ import Multitier.Server.WebSocket as ServerWebSocket exposing (ClientId)
 import Multitier.LowLevel exposing (toJSON, fromJSONString)
 
 import Multitier.Debugger.TimeLine as TimeLine exposing (..)
-
-type ResumeStrategy = FromPrevious | FromPaused
-
-resumeStrategies : Array ResumeStrategy
-resumeStrategies = Array.fromList [FromPrevious, FromPaused]
-
-type ServerDebuggerState = Running | Paused
-
-type alias PreviousState serverModel serverCmd model cmd =
-  { appModel : serverModel
-  , cmd : serverCmd
-  , parentMsg : ParentServerMsg
-  , rpcMsgCount : Int
-  , msgCount : Int
-  , clients : Dict String (ClientId, (model,cmd, ParentMsg, Int, Int))
-  , index : Int }
 
 -- PROGRAM
 
@@ -80,6 +64,7 @@ type alias ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg =
   , appModel : serverModel
   , timeline : TimeLine serverModel serverMsg remoteServerMsg model msg
   , previous : Maybe (PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg))
+  , messagesReceivedDuringPaused : Array (RunCycle, PausedServerMessage serverModel serverMsg remoteServerMsg)
   , resume : ResumeStrategy
   , clientIds : List String
   , msgCount : Int
@@ -87,6 +72,28 @@ type alias ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg =
   , runCycle : RunCycle
   , showParentage : Bool
  }
+
+type alias PreviousState serverModel serverCmd model cmd =
+   { appModel : serverModel
+   , cmd : serverCmd
+   , parentMsg : ParentServerMsg
+   , rpcMsgCount : Int
+   , msgCount : Int
+   , clients : Dict String (ClientId, (model,cmd, ParentMsg, Int, Int))
+   , index : Int }
+
+type PausedServerMessage serverModel serverMsg remoteServerMsg =
+  PausedServerAppMsg (serverMsg -> serverModel -> (serverModel, Cmd serverMsg)) ParentServerMsg serverMsg |
+  PausedRemoteServerAppMsg ClientId (serverModel -> (serverModel, Cmd serverMsg)) Int remoteServerMsg
+
+type ResumeStrategy = FromPrevious | FromPaused
+
+resumeStrategies : Array ResumeStrategy
+resumeStrategies = Array.fromList [FromPrevious, FromPaused]
+
+type ServerDebuggerState = Running | Paused
+
+
 
 socketPath : String
 socketPath = "debug"
@@ -102,6 +109,7 @@ wrapInitServer (serverModel, cmd) =
     , appModel = serverModel
     , timeline = TimeLine.empty serverModel |> TimeLine.pushServerEvent rpcMsgCount (msgCount + 1) (InitServerEvent, serverModel, cmd, None)
     , previous = Maybe.Nothing
+    , messagesReceivedDuringPaused = Array.empty
     , resume = FromPaused
     , clientIds = []
     , msgCount = msgCount + 1
@@ -143,7 +151,7 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
                 , timeline = TimeLine.pushServerEvent debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (RPCchildServerMsg (cid,rpcid,rpcmsgid) debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
                   ! [Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
 
-        Paused -> serverModel ! [] -- TODO save msgs
+        Paused -> { serverModel | debugger = { debugger | messagesReceivedDuringPaused = Array.push (runCycle, PausedServerAppMsg updateServer parent serverAppMsg) debugger.messagesReceivedDuringPaused}} ! []
 
     OnClientConnect cid ->
       { serverModel | debugger =  { debugger | clientIds = (toString cid) :: debugger.clientIds }} ! [initializeClient serverModel cid]
@@ -232,8 +240,8 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
     (\serverModel -> case serverModel.debugger.state of
       Paused ->
         let debugger = serverModel.debugger in
-          let (newServerModel, newServerCmd) = case serverModel.debugger.resume of
-            FromPaused -> { serverModel | debugger = { debugger | state = Running }} ! [broadcastResumeFromPausedAction]
+          let (newServerModel, newServerCmd) = case debugger.resume of
+            FromPaused -> resumeServerFromPaused serverModel
             FromPrevious -> case debugger.previous of
               Just previous ->
                 { serverModel | debugger = { debugger | state = Running
@@ -268,17 +276,57 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
 
 
   RemoteServerAppMsg runCycle cid rpcid msg ->
-    RPC.map (AppMsg NoParentMsg runCycle (Just rpcid)) --TODO check continuity runcycle
-      (\appModel serverModel ->
+    RPC.map (AppMsg NoParentMsg runCycle (Just rpcid))
+      (\updateAppModel serverModel ->
         let debugger = serverModel.debugger in
           case debugger.state of
             Running ->
-              let newServerModel =
-                { serverModel | debugger = { debugger | appModel = appModel, timeline = TimeLine.pushServerEvent debugger.rpcMsgCount debugger.msgCount (ServerRPCevent cid rpcid msg, appModel, Cmd.none, (ServerRPC cid rpcid)) debugger.timeline }}
-              in (newServerModel, Cmd.batch [sendDebuggerModel newServerModel], (ServerAppMsg (ServerRPC cid rpcid) debugger.runCycle))
-            Paused -> (serverModel, Cmd.none, (ServerAppMsg (ServerRPC cid rpcid) debugger.runCycle)))
-          (\serverModel -> serverModel.debugger.appModel)
-          (serverRPCs msg)
+              let (newAppModel,newAppCmd) = updateAppModel debugger.appModel in
+                let newServerModel =
+                  { serverModel | debugger = { debugger | appModel = newAppModel, timeline = TimeLine.pushServerEvent debugger.rpcMsgCount debugger.msgCount (ServerRPCevent cid rpcid msg, newAppModel, Cmd.none, (ServerRPC cid rpcid)) debugger.timeline }}
+              in newServerModel ! [Cmd.map (ServerAppMsg (ServerRPC cid rpcid) debugger.runCycle) newAppCmd, sendDebuggerModel newServerModel]
+            Paused -> { serverModel | debugger = { debugger | messagesReceivedDuringPaused = Array.push (runCycle, PausedRemoteServerAppMsg cid updateAppModel rpcid msg) debugger.messagesReceivedDuringPaused}} ! [])
+      (\serverModel -> serverModel.debugger.appModel)
+      (serverRPCs msg)
+
+resumeServerFromPaused : ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
+resumeServerFromPaused serverModel = resumeServerFromPausedHelp (Array.toList serverModel.debugger.messagesReceivedDuringPaused) (serverModel, Cmd.none)
+
+resumeServerFromPausedHelp : List (RunCycle, PausedServerMessage serverModel serverMsg remoteServerMsg) -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg)) -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
+resumeServerFromPausedHelp messages (serverModel, cmd) = let debugger = serverModel.debugger in
+  case messages of
+    [] -> { serverModel | debugger = { debugger | state = Running }} ! [cmd, broadcastResumeFromPausedAction]
+    (runCycle,message) :: otherMessages -> if runCycle < debugger.runCycle
+      then serverModel ! []
+      else updateServerWithPausedMessage message (serverModel,cmd)
+
+updateServerWithPausedMessage : PausedServerMessage serverModel serverMsg remoteServerMsg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg)) -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
+updateServerWithPausedMessage pausedMessage (serverModel, serverCmd) = let debugger = serverModel.debugger in
+  case pausedMessage of
+    PausedServerAppMsg updateServer parentMsg serverAppMsg ->
+      let (newAppModel, cmd) = updateServer serverAppMsg debugger.appModel in
+        case parentMsg of
+          None ->
+            { serverModel | debugger = { debugger | appModel = newAppModel, msgCount = debugger.msgCount + 1
+            , timeline = TimeLine.pushServerEvent debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (NewServerMsg debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
+              ! [serverCmd, Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
+          RegularServerMsg parentID ->
+            { serverModel | debugger = { debugger | appModel = newAppModel, msgCount = debugger.msgCount + 1
+            , timeline = TimeLine.pushServerEvent debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (ServerChildMsg parentID debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
+              ! [serverCmd, Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
+          ServerRPC cid rpcid ->
+            { serverModel | debugger = { debugger | appModel = newAppModel, rpcMsgCount = debugger.rpcMsgCount + 1
+            , timeline = TimeLine.pushServerEvent (debugger.rpcMsgCount + 1) debugger.msgCount (((ServerMsgEvent (RPCserverMsg cid rpcid debugger.rpcMsgCount)) serverAppMsg), newAppModel, cmd, (ServerRPCmsg (cid, rpcid, debugger.rpcMsgCount))) debugger.timeline }}
+              ! [serverCmd, Cmd.map (ServerAppMsg (ServerRPCmsg (cid, rpcid, debugger.rpcMsgCount)) debugger.runCycle) cmd]
+          ServerRPCmsg (cid,rpcid,rpcmsgid) ->
+            { serverModel | debugger = { debugger | appModel = newAppModel, msgCount = debugger.msgCount + 1
+            , timeline = TimeLine.pushServerEvent debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (RPCchildServerMsg (cid,rpcid,rpcmsgid) debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
+              ! [serverCmd, Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
+    PausedRemoteServerAppMsg cid updateServer rpcid remoteServerMsg ->
+      let (newAppModel,newAppCmd) = updateServer debugger.appModel in
+        { serverModel | debugger = { debugger | appModel = newAppModel, timeline = TimeLine.pushServerEvent debugger.rpcMsgCount debugger.msgCount (ServerRPCevent cid rpcid remoteServerMsg, newAppModel, Cmd.none, (ServerRPC cid rpcid)) debugger.timeline }}
+          ! [Cmd.map (ServerAppMsg (ServerRPC cid rpcid) debugger.runCycle) newAppCmd]
+
 
 -- SERVER-STATE
 
@@ -527,10 +575,6 @@ wrapView appView = \model -> case model of
 timelineView : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 timelineView smodel =
   let
-    defs =
-      [Svg.defs [] [
-        Svg.marker [id "arrow", viewBox "0 0 10 10", refX "1", refY "5", markerWidth "6", markerHeight "6", orient "auto"] [
-          Svg.path [d "M 0 0 L 10 5 L 0 10 z"] []]]]
     clients = TimeLine.clients smodel.timeline |> List.indexedMap (\index cid -> ((toString cid), index)) in
   let
     clientIndices = clients |> Dict.fromList in
@@ -550,7 +594,7 @@ timelineView smodel =
                   let px1 = (parentIndex * eventSpacing) + offset
                       px2 = (index * eventSpacing) + offset
                       qx = px1 + ((px2 - px1) // 2) in
-                    [Svg.path [d ("M "++(toString px1)++" 20 Q "++(toString qx)++ " 0 "++(toString px2)++" 20"), markerEnd "url(#arrow)", stroke "black", fill "transparent"] []]
+                    [Svg.path [d ("M "++(toString px1)++" 20 Q "++(toString qx)++ " 0 "++(toString px2)++" 20"), stroke "black", fill "transparent"] []]
                 _ -> []
               else []
             in List.append parentLine
@@ -567,7 +611,7 @@ timelineView smodel =
                           py2 = (clientIndex * 40) + 60
                           qx = px1 + ((px2 - px1) // 2)
                           qy = ((clientIndex * 40) + 60) - 20 in
-                        [Svg.path [d ("M "++(toString px1)++" "++(toString py1)++" Q "++(toString qx)++ " "++(toString qy)++" "++(toString px2)++" "++(toString py2)), markerEnd "url(#arrow)", stroke "black", fill "transparent"] []]
+                        [Svg.path [d ("M "++(toString px1)++" "++(toString py1)++" Q "++(toString qx)++ " "++(toString qy)++" "++(toString px2)++" "++(toString py2)), stroke "black", fill "transparent"] []]
                     _ -> []
                   else []
                  in List.append parentLine [Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((clientIndex * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] []] in
@@ -598,7 +642,6 @@ timelineView smodel =
   Html.div [id "timeline", style [("overflow-x", "auto")]] [
     Svg.svg [ width (toString ((((TimeLine.length smodel.timeline) - 1) * eventSpacing) + (offset * 2))), height (toString (40 * ((TimeLine.numberOfClients smodel.timeline) + 1)))]
       (List.concat [
-        defs,
         [serverLine],
         clientLines,
         circles ])]
