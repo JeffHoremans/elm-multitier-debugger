@@ -8,7 +8,7 @@ import Html exposing (Html)
 import Html.Attributes exposing (checked, style, disabled, size, value, type_, selected, id)
 import Html.Events exposing (onClick, onCheck, on)
 import Svg
-import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy, fill, stroke, d)
+import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy, fill, stroke, d, refX, refY, markerWidth, markerHeight, orient, markerEnd)
 import Array exposing (Array)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
@@ -527,6 +527,10 @@ wrapView appView = \model -> case model of
 timelineView : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 timelineView smodel =
   let
+    defs =
+      [Svg.defs [] [
+        Svg.marker [id "arrow", viewBox "0 0 10 10", refX "1", refY "5", markerWidth "6", markerHeight "6", orient "auto"] [
+          Svg.path [d "M 0 0 L 10 5 L 0 10 z"] []]]]
     clients = TimeLine.clients smodel.timeline |> List.indexedMap (\index cid -> ((toString cid), index)) in
   let
     clientIndices = clients |> Dict.fromList in
@@ -546,7 +550,7 @@ timelineView smodel =
                   let px1 = (parentIndex * eventSpacing) + offset
                       px2 = (index * eventSpacing) + offset
                       qx = px1 + ((px2 - px1) // 2) in
-                    [Svg.path [d ("M "++(toString px1)++" 20 Q "++(toString qx)++ " 0 "++(toString px2)++" 20"), stroke "black", fill "transparent"] []]
+                    [Svg.path [d ("M "++(toString px1)++" 20 Q "++(toString qx)++ " 0 "++(toString px2)++" 20"), markerEnd "url(#arrow)", stroke "black", fill "transparent"] []]
                 _ -> []
               else []
             in List.append parentLine
@@ -563,7 +567,7 @@ timelineView smodel =
                           py2 = (clientIndex * 40) + 60
                           qx = px1 + ((px2 - px1) // 2)
                           qy = ((clientIndex * 40) + 60) - 20 in
-                        [Svg.path [d ("M "++(toString px1)++" "++(toString py1)++" Q "++(toString qx)++ " "++(toString qy)++" "++(toString px2)++" "++(toString py2)), stroke "black", fill "transparent"] []]
+                        [Svg.path [d ("M "++(toString px1)++" "++(toString py1)++" Q "++(toString qx)++ " "++(toString qy)++" "++(toString px2)++" "++(toString py2)), markerEnd "url(#arrow)", stroke "black", fill "transparent"] []]
                     _ -> []
                   else []
                  in List.append parentLine [Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((clientIndex * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] []] in
@@ -594,6 +598,7 @@ timelineView smodel =
   Html.div [id "timeline", style [("overflow-x", "auto")]] [
     Svg.svg [ width (toString ((((TimeLine.length smodel.timeline) - 1) * eventSpacing) + (offset * 2))), height (toString (40 * ((TimeLine.numberOfClients smodel.timeline) + 1)))]
       (List.concat [
+        defs,
         [serverLine],
         clientLines,
         circles ])]
