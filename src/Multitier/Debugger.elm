@@ -85,6 +85,7 @@ type alias ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg =
   , msgCount : Int
   , rpcMsgCount : Int
   , runCycle : RunCycle
+  , showParentage : Bool
  }
 
 socketPath : String
@@ -105,7 +106,8 @@ wrapInitServer (serverModel, cmd) =
     , clientIds = []
     , msgCount = msgCount + 1
     , rpcMsgCount = rpcMsgCount
-    , runCycle = runCycle }
+    , runCycle = runCycle
+    , showParentage = True }
   , clients =
     { debugging = Dict.empty }} ! [Cmd.map (ServerAppMsg (RegularServerMsg msgCount) runCycle) cmd]
 
@@ -196,7 +198,7 @@ type RemoteServerMsg remoteServerMsg model msg =
 
   StartDebugView ClientId | StopDebugView ClientId |
   PauseDebugger | ResumeDebugger | GoBackDebugger Int |
-  SetDebuggerResumeStrategy ResumeStrategy |
+  SetDebuggerResumeStrategy ResumeStrategy | ToggleShowParentageDebugger Bool |
 
   AddClientEvent ClientId Int Int (ClientEventType msg) model (MultitierCmd remoteServerMsg msg) ParentMsg
 
@@ -245,7 +247,14 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
            (newServerModel, Task.succeed (), Cmd.batch [newServerCmd, sendDebuggerModel newServerModel])
       _ -> (serverModel, Task.succeed (), Cmd.none))
 
-  SetDebuggerResumeStrategy resume -> rpc Handle (\serverModel -> let debugger = serverModel.debugger in ({ serverModel | debugger = { debugger | resume = resume }}, Task.succeed (), Cmd.none))
+  SetDebuggerResumeStrategy resume ->
+    rpc Handle (\serverModel ->
+      let debugger = serverModel.debugger in
+        let newServerModel = { serverModel | debugger = { debugger | resume = resume }} in (newServerModel, Task.succeed (), sendDebuggerModel newServerModel))
+  ToggleShowParentageDebugger showParentage ->
+    rpc Handle (\serverModel ->
+      let debugger = serverModel.debugger in
+        let newServerModel = { serverModel | debugger = { debugger | showParentage = showParentage}} in (newServerModel, Task.succeed (), sendDebuggerModel newServerModel))
 
   GoBackDebugger index -> rpc Handle
     (\serverModel ->
@@ -312,7 +321,7 @@ type Msg model msg serverModel serverMsg remoteServerMsg =
   OnSocketMsg String |
 
   Pause | Resume | GoBack Int |
-  SetResume Int |
+  SetResume Int | ToggleShowParentage Bool |
 
   SwitchDebugger |
 
@@ -400,6 +409,7 @@ wrapUpdate update = \msg model -> case model of
     SetResume index -> case Array.get index resumeStrategies of
       Just resume -> model !! [performOnServer (SetDebuggerResumeStrategy resume)]
       _ -> model !! []
+    ToggleShowParentage runInBackground -> model !! [performOnServer (ToggleShowParentageDebugger runInBackground)]
 
     SwitchDebugger -> model !! [performOnServer (StopDebugView cid)]
     HandleStopDebugView result -> case result of
@@ -530,13 +540,15 @@ timelineView smodel =
       TimeLine.view smodel.timeline
         |> List.map (\(index, event) -> case event of
           ServerEvent serverEventType ->
-            let parentLine = case TimeLine.getServerEventParentIndex serverEventType smodel.timeline of
-              Just parentIndex ->
-                let px1 = (parentIndex * eventSpacing) + offset
-                    px2 = (index * eventSpacing) + offset
-                    qx = px1 + ((px2 - px1) // 2) in
-                  [Svg.path [d ("M "++(toString px1)++" 20 Q "++(toString qx)++ " 0 "++(toString px2)++" 20"), stroke "black", fill "transparent"] []]
-              _ -> []
+            let parentLine = if smodel.showParentage then
+              case TimeLine.getServerEventParentIndex serverEventType smodel.timeline of
+                Just parentIndex ->
+                  let px1 = (parentIndex * eventSpacing) + offset
+                      px2 = (index * eventSpacing) + offset
+                      qx = px1 + ((px2 - px1) // 2) in
+                      [Svg.path [d ("M "++(toString px1)++" 20 Q "++(toString qx)++ " 0 "++(toString px2)++" 20"), stroke "black", fill "transparent"] []]
+                _ -> []
+              else []
             in List.append parentLine
               [Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] []]
           ClientEvent cid clientEvent ->
@@ -623,5 +635,7 @@ serverActions : ServerDebuggerModel serverModel serverMsg remoteServerMsg model 
 serverActions model props = Html.div [] [
   Html.button [onClick props.btnAction] [Html.text props.btnText],
   Html.br [] [],
+    Html.text "Show parentage: ",
+    Html.input [checked model.showParentage, type_ "checkbox", onCheck ToggleShowParentage] [],
     Html.text "Resume from: ",
     Html.select [disabled props.hideResumeFrom, on "change" (Decode.map SetResume targetSelectedIndex)] (selectResume model.resume)]
