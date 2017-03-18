@@ -546,14 +546,27 @@ timelineView smodel =
                   let px1 = (parentIndex * eventSpacing) + offset
                       px2 = (index * eventSpacing) + offset
                       qx = px1 + ((px2 - px1) // 2) in
-                      [Svg.path [d ("M "++(toString px1)++" 20 Q "++(toString qx)++ " 0 "++(toString px2)++" 20"), stroke "black", fill "transparent"] []]
+                    [Svg.path [d ("M "++(toString px1)++" 20 Q "++(toString qx)++ " 0 "++(toString px2)++" 20"), stroke "black", fill "transparent"] []]
                 _ -> []
               else []
             in List.append parentLine
               [Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] []]
           ClientEvent cid clientEvent ->
             let clientIndex = Maybe.withDefault 0 (Dict.get (toString cid) clientIndices) in
-              let circle = Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((clientIndex * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] [] in
+              let circle =
+                let parentLine = if smodel.showParentage then
+                  case TimeLine.getClientEventParentIndex cid clientEvent smodel.timeline of
+                    Just parentIndex ->
+                      let px1 = (parentIndex * eventSpacing) + offset
+                          py1 = (clientIndex * 40) + 60
+                          px2 = (index * eventSpacing) + offset
+                          py2 = (clientIndex * 40) + 60
+                          qx = px1 + ((px2 - px1) // 2)
+                          qy = ((clientIndex * 40) + 60) - 20 in
+                        [Svg.path [d ("M "++(toString px1)++" "++(toString py1)++" Q "++(toString qx)++ " "++(toString qy)++" "++(toString px2)++" "++(toString py2)), stroke "black", fill "transparent"] []]
+                    _ -> []
+                  else []
+                 in List.append parentLine [Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((clientIndex * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] []] in
                 let (maybeRPCid, rpcIds) = case clientEvent of
                   Init ids -> (Maybe.Nothing, ids)
                   MsgEvent _ id ids _ -> (id,ids) in
@@ -567,8 +580,8 @@ timelineView smodel =
                                 case serverEventIndex of
                                   Just serverIndex -> [Svg.line [x1 (toString ((index * eventSpacing) + offset )) , y1 (toString ((clientIndex * 40) + 60)), x2 (toString ((serverIndex * eventSpacing) + offset )), y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []]
                                   _ -> [] in
-                                circle :: (List.append rpcLine (List.concat rpcLines))
-                              _ -> circle :: (List.concat rpcLines))
+                                List.append circle (List.append rpcLine (List.concat rpcLines))
+                              _ -> List.append circle (List.concat rpcLines))
 
         |> List.concat
 
