@@ -298,7 +298,7 @@ resumeServerFromPausedHelp messages (serverModel, cmd) = let debugger = serverMo
     [] -> { serverModel | debugger = { debugger | state = Running }} ! [cmd, broadcastResumeFromPausedAction]
     (runCycle,message) :: otherMessages -> if runCycle < debugger.runCycle
       then serverModel ! []
-      else updateServerWithPausedMessage message (serverModel,cmd)
+      else resumeServerFromPausedHelp otherMessages (updateServerWithPausedMessage message (serverModel,cmd))
 
 updateServerWithPausedMessage : PausedServerMessage serverModel serverMsg remoteServerMsg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg)) -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
 updateServerWithPausedMessage pausedMessage (serverModel, serverCmd) = let debugger = serverModel.debugger in
