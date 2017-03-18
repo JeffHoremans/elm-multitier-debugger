@@ -107,7 +107,7 @@ wrapInitServer (serverModel, cmd) =
   { debugger =
     { state = Running
     , appModel = serverModel
-    , timeline = TimeLine.empty serverModel |> TimeLine.pushServerEvent rpcMsgCount (msgCount + 1) (InitServerEvent, serverModel, cmd, None)
+    , timeline = TimeLine.empty serverModel |> TimeLine.pushServerEvent runCycle rpcMsgCount (msgCount + 1) (InitServerEvent, serverModel, cmd, None)
     , previous = Maybe.Nothing
     , messagesReceivedDuringPaused = Array.empty
     , resume = FromPaused
@@ -136,19 +136,19 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
             case parent of
               None ->
                 { serverModel | debugger = { debugger | appModel = newAppModel, msgCount = debugger.msgCount + 1
-                , timeline = TimeLine.pushServerEvent debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (NewServerMsg debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
+                , timeline = TimeLine.pushServerEvent debugger.runCycle debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (NewServerMsg debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
                   ! [Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
               RegularServerMsg parentID ->
                 { serverModel | debugger = { debugger | appModel = newAppModel, msgCount = debugger.msgCount + 1
-                , timeline = TimeLine.pushServerEvent debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (ServerChildMsg parentID debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
+                , timeline = TimeLine.pushServerEvent debugger.runCycle debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (ServerChildMsg parentID debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
                   ! [Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
               ServerRPC cid rpcid ->
                 { serverModel | debugger = { debugger | appModel = newAppModel, rpcMsgCount = debugger.rpcMsgCount + 1
-                , timeline = TimeLine.pushServerEvent (debugger.rpcMsgCount + 1) debugger.msgCount (((ServerMsgEvent (RPCserverMsg cid rpcid debugger.rpcMsgCount)) serverAppMsg), newAppModel, cmd, (ServerRPCmsg (cid, rpcid, debugger.rpcMsgCount))) debugger.timeline }}
+                , timeline = TimeLine.pushServerEvent debugger.runCycle (debugger.rpcMsgCount + 1) debugger.msgCount (((ServerMsgEvent (RPCserverMsg cid rpcid debugger.rpcMsgCount)) serverAppMsg), newAppModel, cmd, (ServerRPCmsg (cid, rpcid, debugger.rpcMsgCount))) debugger.timeline }}
                   ! [Cmd.map (ServerAppMsg (ServerRPCmsg (cid, rpcid, debugger.rpcMsgCount)) debugger.runCycle) cmd]
               ServerRPCmsg (cid,rpcid,rpcmsgid) ->
                 { serverModel | debugger = { debugger | appModel = newAppModel, msgCount = debugger.msgCount + 1
-                , timeline = TimeLine.pushServerEvent debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (RPCchildServerMsg (cid,rpcid,rpcmsgid) debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
+                , timeline = TimeLine.pushServerEvent debugger.runCycle debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (RPCchildServerMsg (cid,rpcid,rpcmsgid) debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
                   ! [Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
 
         Paused -> case parent of
@@ -226,7 +226,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
     (\serverModel -> let debugger = serverModel.debugger in
       case debugger.state of
         Running ->
-          let newServerModel = { serverModel | debugger = { debugger | timeline = TimeLine.pushClientEvent cid rpcCount msgCount (event,model,cmd,parentMsg) debugger.timeline }} in
+          let newServerModel = { serverModel | debugger = { debugger | timeline = TimeLine.pushClientEvent debugger.runCycle cid rpcCount msgCount (event,model,cmd,parentMsg) debugger.timeline }} in
             (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
         Paused -> (serverModel, Task.succeed (), Cmd.none)) -- TODO what to do in this case?
 
@@ -285,7 +285,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
             Running ->
               let (newAppModel,newAppCmd) = updateAppModel debugger.appModel in
                 let newServerModel =
-                  { serverModel | debugger = { debugger | appModel = newAppModel, timeline = TimeLine.pushServerEvent debugger.rpcMsgCount debugger.msgCount (ServerRPCevent cid rpcid msg, newAppModel, Cmd.none, (ServerRPC cid rpcid)) debugger.timeline }}
+                  { serverModel | debugger = { debugger | appModel = newAppModel, timeline = TimeLine.pushServerEvent debugger.runCycle debugger.rpcMsgCount debugger.msgCount (ServerRPCevent cid rpcid msg, newAppModel, Cmd.none, (ServerRPC cid rpcid)) debugger.timeline }}
               in newServerModel ! [Cmd.map (ServerAppMsg (ServerRPC cid rpcid) debugger.runCycle) newAppCmd, sendDebuggerModel newServerModel]
             Paused -> { serverModel | debugger = { debugger | messagesReceivedDuringPaused = Array.push (runCycle, PausedRemoteServerAppMsg cid updateAppModel rpcid msg) debugger.messagesReceivedDuringPaused}} ! [])
       (\serverModel -> serverModel.debugger.appModel)
@@ -310,23 +310,23 @@ updateServerWithPausedMessage pausedMessage (serverModel, serverCmd) = let debug
         case parentMsg of
           None ->
             { serverModel | debugger = { debugger | appModel = newAppModel, msgCount = debugger.msgCount + 1
-            , timeline = TimeLine.pushServerEvent debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (NewServerMsg debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
+            , timeline = TimeLine.pushServerEvent debugger.runCycle debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (NewServerMsg debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
               ! [serverCmd, Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
           RegularServerMsg parentID ->
             { serverModel | debugger = { debugger | appModel = newAppModel, msgCount = debugger.msgCount + 1
-            , timeline = TimeLine.pushServerEvent debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (ServerChildMsg parentID debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
+            , timeline = TimeLine.pushServerEvent debugger.runCycle debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (ServerChildMsg parentID debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
               ! [serverCmd, Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
           ServerRPC cid rpcid ->
             { serverModel | debugger = { debugger | appModel = newAppModel, rpcMsgCount = debugger.rpcMsgCount + 1
-            , timeline = TimeLine.pushServerEvent (debugger.rpcMsgCount + 1) debugger.msgCount (((ServerMsgEvent (RPCserverMsg cid rpcid debugger.rpcMsgCount)) serverAppMsg), newAppModel, cmd, (ServerRPCmsg (cid, rpcid, debugger.rpcMsgCount))) debugger.timeline }}
+            , timeline = TimeLine.pushServerEvent debugger.runCycle (debugger.rpcMsgCount + 1) debugger.msgCount (((ServerMsgEvent (RPCserverMsg cid rpcid debugger.rpcMsgCount)) serverAppMsg), newAppModel, cmd, (ServerRPCmsg (cid, rpcid, debugger.rpcMsgCount))) debugger.timeline }}
               ! [serverCmd, Cmd.map (ServerAppMsg (ServerRPCmsg (cid, rpcid, debugger.rpcMsgCount)) debugger.runCycle) cmd]
           ServerRPCmsg (cid,rpcid,rpcmsgid) ->
             { serverModel | debugger = { debugger | appModel = newAppModel, msgCount = debugger.msgCount + 1
-            , timeline = TimeLine.pushServerEvent debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (RPCchildServerMsg (cid,rpcid,rpcmsgid) debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
+            , timeline = TimeLine.pushServerEvent debugger.runCycle debugger.rpcMsgCount (debugger.msgCount + 1) (((ServerMsgEvent (RPCchildServerMsg (cid,rpcid,rpcmsgid) debugger.msgCount)) serverAppMsg), newAppModel, cmd, (RegularServerMsg debugger.msgCount)) debugger.timeline }}
               ! [serverCmd, Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
     PausedRemoteServerAppMsg cid updateServer rpcid remoteServerMsg ->
       let (newAppModel,newAppCmd) = updateServer debugger.appModel in
-        { serverModel | debugger = { debugger | appModel = newAppModel, timeline = TimeLine.pushServerEvent debugger.rpcMsgCount debugger.msgCount (ServerRPCevent cid rpcid remoteServerMsg, newAppModel, Cmd.none, (ServerRPC cid rpcid)) debugger.timeline }}
+        { serverModel | debugger = { debugger | appModel = newAppModel, timeline = TimeLine.pushServerEvent debugger.runCycle debugger.rpcMsgCount debugger.msgCount (ServerRPCevent cid rpcid remoteServerMsg, newAppModel, Cmd.none, (ServerRPC cid rpcid)) debugger.timeline }}
           ! [Cmd.map (ServerAppMsg (ServerRPC cid rpcid) debugger.runCycle) newAppCmd]
 
 
@@ -591,7 +591,7 @@ timelineView smodel =
     eventSpacing = 25
     circles =
       TimeLine.view smodel.timeline
-        |> List.map (\(index, event) -> case event of
+        |> List.map (\(index, (runCycle,event)) -> case event of
           ServerEvent serverEventType ->
             let parentLine = if smodel.showParentage then
               case TimeLine.getServerEventParentIndex serverEventType smodel.timeline of
@@ -658,7 +658,7 @@ eventsView smodel =
       Just previous -> previous.index
       _ -> (TimeLine.length smodel.timeline) - 1
     options = TimeLine.view smodel.timeline
-      |> List.map (\(index, event) -> Html.option [onClick (GoBack index), selected (previousIndex == index)] [Html.text (eventView event)])
+      |> List.map (\(index, (runCycle,event)) -> Html.option [onClick (GoBack index), selected (previousIndex == index)] [Html.text (eventView runCycle event)])
       |> List.reverse
   in Html.div [] [
     Html.select [size 15] options]
@@ -668,13 +668,13 @@ type alias ActionProps msg =
   , btnText: String
   , hideResumeFrom: Bool }
 
-eventView : Event serverMsg remoteServerMsg msg -> String
-eventView event = case event of
-  ClientEvent cid cevent -> clientEventView cid cevent
-  ServerEvent sevent -> serverEventView sevent
+eventView : RunCycle -> Event serverMsg remoteServerMsg msg -> String
+eventView runCycle event = case event of
+  ClientEvent cid cevent -> clientEventView runCycle cid cevent
+  ServerEvent sevent -> serverEventView runCycle sevent
 
-clientEventView : ClientId -> ClientEventType msg -> String
-clientEventView cid event =
+clientEventView : RunCycle -> ClientId -> ClientEventType msg -> String
+clientEventView runCycle cid event = "(" ++ (toString runCycle) ++ ")" ++
   case event of
     Init rpcids -> "[Init-"++ (toString cid) ++ "-" ++ (toString rpcids) ++"]"
     MsgEvent msgType maybeRPCid rpcids msg -> case maybeRPCid of
@@ -686,8 +686,8 @@ clientEventView cid event =
         NewClientMsg msgid -> "[NewMsg-"++ (toString cid) ++ "-" ++ (toString msgid) ++ "-" ++ (toString rpcids) ++"] " ++ (toString msg)
         ClientChildMsg parentid msgid -> "[ChildMsg-"++ (toString cid) ++ "-(" ++ (toString parentid) ++ "," ++ (toString msgid) ++ ")-" ++ (toString rpcids) ++"] " ++ (toString msg)
 
-serverEventView : ServerEventType serverMsg remoteServerMsg -> String
-serverEventView event =
+serverEventView : RunCycle -> ServerEventType serverMsg remoteServerMsg -> String
+serverEventView runCycle event = "(" ++ (toString runCycle) ++ ")" ++
   case event of
     InitServerEvent -> "[Init-Server]"
     ServerMsgEvent msgtype msg -> case msgtype of
