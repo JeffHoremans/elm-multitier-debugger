@@ -8,7 +8,7 @@ import Html exposing (Html)
 import Html.Attributes exposing (checked, style, disabled, size, value, type_, selected, id)
 import Html.Events exposing (onClick, onCheck, on)
 import Svg
-import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy, fill)
+import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy, fill, d)
 import Array exposing (Array)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
@@ -529,8 +529,16 @@ timelineView smodel =
     circles =
       TimeLine.view smodel.timeline
         |> List.map (\(index, event) -> case event of
-          ServerEvent sserverEvent ->
-            [Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] []]
+          ServerEvent serverEventType ->
+            let parentLine = case TimeLine.getServerEventParentIndex serverEventType smodel.timeline of
+              Just parentIndex ->
+                let px1 = (parentIndex * eventSpacing) + offset
+                    px2 = (index * eventSpacing) + offset
+                    qx = px1 + ((px2 - px1) // 2) in
+                  [Svg.path [d ("M "++(toString px1)++" 20 Q "++(toString qx)++ " 5 "++(toString px2)++" 20"), style [("stroke", "black"), ("stroke-width", "1")]] []]
+              _ -> []
+            in List.append parentLine
+              [Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy "20", onClick (GoBack index), style [("cursor", "pointer")]] []]
           ClientEvent cid clientEvent ->
             let clientIndex = Maybe.withDefault 0 (Dict.get (toString cid) clientIndices) in
               let circle = Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((clientIndex * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] [] in
