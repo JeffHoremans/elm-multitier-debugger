@@ -152,7 +152,7 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
                   ! [Cmd.map (ServerAppMsg (RegularServerMsg debugger.msgCount) debugger.runCycle) cmd]
 
         Paused -> case parent of
-          None -> serverModel ! []
+          None -> serverModel ! [] -- TODO check for certain...
           _ -> { serverModel | debugger = { debugger | messagesReceivedDuringPaused = Array.push (runCycle, PausedServerAppMsg updateServer parent serverAppMsg) debugger.messagesReceivedDuringPaused}} ! []
 
     OnClientConnect cid ->
@@ -297,7 +297,7 @@ resumeServerFromPaused serverModel = resumeServerFromPausedHelp (Array.toList se
 resumeServerFromPausedHelp : List (RunCycle, PausedServerMessage serverModel serverMsg remoteServerMsg) -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg)) -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
 resumeServerFromPausedHelp messages (serverModel, cmd) = let debugger = serverModel.debugger in
   case messages of
-    [] -> { serverModel | debugger = { debugger | state = Running }} ! [cmd, broadcastResumeFromPausedAction]
+    [] -> { serverModel | debugger = { debugger | state = Running, messagesReceivedDuringPaused = Array.empty }} ! [cmd, broadcastResumeFromPausedAction]
     (runCycle,message) :: otherMessages -> if runCycle < debugger.runCycle
       then serverModel ! []
       else resumeServerFromPausedHelp otherMessages (updateServerWithPausedMessage message (serverModel,cmd))
