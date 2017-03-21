@@ -344,13 +344,13 @@ checkEvents eventsToCheck goBackIndex serverModel = case eventsToCheck of
       case event of
         ServerEvent eventType ->
           let handleEvent parent serverMsg =
-            if TimeLine.isServerParentMember runCycle parent serverModel.debugger.timeline then
+            if TimeLine.isServerParentMember runCycle parent serverModel.debugger.timeline || TimeLine.isServerParentMember serverModel.debugger.runCycle parent serverModel.debugger.timeline then
               case TimeLine.getServerEventParentIndex eventType serverModel.debugger.timeline of
                 Just index -> case goBackIndex == index of
                   False -> let (newServerModel,_) = updateServerAppModel parent serverMsg serverModel in newServerModel
                   True -> let test = Debug.log "Message discarded because parent is the go back point:" (toString serverMsg) in serverModel -- Message discarded...
                 _ -> serverModel -- Not possible
-            else let test = Debug.log "Message discarded because parent does not exist in new timeline:" (toString serverModel.debugger.timeline) in serverModel  -- Message discarded...
+            else let test = Debug.log "Message discarded because parent does not exist in new timeline:" (toString serverMsg) in serverModel  -- Message discarded...
           in case eventType of
             ServerMsgEvent msgType serverMsg -> case msgType of
               NewServerMsg msgid -> handleEvent None serverMsg
