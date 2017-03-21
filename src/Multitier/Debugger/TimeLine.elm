@@ -35,7 +35,7 @@ type alias RunCycle = Int
 type TimeLine serverModel serverMsg remoteServerMsg model msg = TimeLine (Model serverModel serverMsg remoteServerMsg model msg)
 
 type alias Model serverModel serverMsg remoteServerMsg model msg =
-  { events : Array (RunCycle, Event serverMsg remoteServerMsg msg, EventRecoveryState serverModel serverMsg remoteServerMsg model msg)
+  { events : Array (RunCycle, Event serverModel serverMsg remoteServerMsg msg, EventRecoveryState serverModel serverMsg remoteServerMsg model msg)
   , server : (serverModel, Cmd serverMsg, ParentServerMsg, Int, Int)
   , clients : Dict String (ClientId, (model, MultitierCmd remoteServerMsg msg, ParentMsg, Int, Int))
   , rpcindices : Dict (String,Int) Int
@@ -55,8 +55,8 @@ type alias EventRecoveryState serverModel serverMsg remoteServerMsg model msg =
     , rpc : Dict (String,Int) (RunCycle, Int)
     , rpcchild: Dict (String,Int,Int) (RunCycle, Int) }}
 
-type Event serverMsg remoteServerMsg msg =
-  ServerEvent (ServerEventType serverMsg remoteServerMsg) |
+type Event serverModel serverMsg remoteServerMsg msg =
+  ServerEvent (ServerEventType serverModel serverMsg remoteServerMsg) |
   ClientEvent ClientId (ClientEventType msg)
 
 type ClientEventType msg = Init (List Int) | MsgEvent ClientMsgType (Maybe Int) (List Int) msg
@@ -69,10 +69,10 @@ type ParentMsg =
   NoParentMsg |
   RegularMsg Int
 
-type ServerEventType serverMsg remoteServerMsg =
+type ServerEventType serverModel serverMsg remoteServerMsg =
   InitServerEvent |
   ServerMsgEvent ServerMsgType serverMsg |
-  ServerRPCevent ClientId Int remoteServerMsg
+  ServerRPCevent ClientId Int Int (serverModel -> (serverModel,Cmd serverMsg)) remoteServerMsg
 
 type ServerMsgType =
   NewServerMsg Int |
@@ -89,17 +89,17 @@ type ParentServerMsg =
 empty : serverModel -> TimeLine serverModel serverMsg remoteServerMsg model msg
 empty serverModel = TimeLine (Model Array.empty (serverModel,Cmd.none,None,0,0) Dict.empty Dict.empty Dict.empty {regular=Dict.empty, rpc=Dict.empty,rpcchild=Dict.empty})
 
-pushServerEvent : RunCycle -> Int -> Int -> ((ServerEventType serverMsg remoteServerMsg), serverModel, Cmd serverMsg, ParentServerMsg) -> TimeLine serverModel serverMsg remoteServerMsg model msg -> TimeLine serverModel serverMsg remoteServerMsg model msg
+pushServerEvent : RunCycle -> Int -> Int -> ((ServerEventType serverModel serverMsg remoteServerMsg), serverModel, Cmd serverMsg, ParentServerMsg) -> TimeLine serverModel serverMsg remoteServerMsg model msg -> TimeLine serverModel serverMsg remoteServerMsg model msg
 pushServerEvent runCycle rpcMsgCount msgCount (serverEvent, serverModel, serverCmd, parentMsg) (TimeLine {events, clients, rpcindices, clientParentIndices, serverParentIndices}) =
   let currentIndex = Array.length events in
   let value = (runCycle,currentIndex) in
   let newServer = (serverModel, serverCmd, parentMsg, rpcMsgCount, msgCount)
       newRPCindices = case serverEvent of
-        ServerRPCevent cid rpcid _ -> Dict.insert ((toString cid), rpcid) currentIndex rpcindices
+        ServerRPCevent cid rpcid _ _ _ -> Dict.insert ((toString cid), rpcid) currentIndex rpcindices
         _ -> rpcindices
       newParentIndices = case serverEvent of
          InitServerEvent -> { serverParentIndices | regular = Dict.insert 0 value serverParentIndices.regular}
-         ServerRPCevent cid rpcid _ -> { serverParentIndices | rpc = Dict.insert ((toString cid),rpcid) value serverParentIndices.rpc}
+         ServerRPCevent cid rpcid _ _ _ -> { serverParentIndices | rpc = Dict.insert ((toString cid),rpcid) value serverParentIndices.rpc}
          ServerMsgEvent serverMsgType _ -> case serverMsgType of
            NewServerMsg msgid -> { serverParentIndices | regular = Dict.insert msgid value serverParentIndices.regular}
            ServerChildMsg _ msgid -> { serverParentIndices | regular = Dict.insert msgid value serverParentIndices.regular}
@@ -136,7 +136,7 @@ previousRecoveryState index (TimeLine {events, server, clients, rpcindices, clie
     Just (_,_, recoveryState) -> recoveryState
     _ -> EventRecoveryState server clients rpcindices clientParentIndices serverParentIndices
 
-goBack : Int -> TimeLine serverModel serverMsg remoteServerMsg model msg -> (TimeLine serverModel serverMsg remoteServerMsg model msg, List (RunCycle, Event serverMsg remoteServerMsg msg))
+goBack : Int -> TimeLine serverModel serverMsg remoteServerMsg model msg -> (TimeLine serverModel serverMsg remoteServerMsg model msg, List (RunCycle, Event serverModel serverMsg remoteServerMsg msg))
 goBack index (TimeLine model) =
   let newEvents = model.events |> Array.slice 0 (index+1)
       eventsToCheck = model.events |> Array.slice (index+1) (Array.length model.events) |> Array.map (\(runCycle,event,_) -> (runCycle,event)) |> Array.toList
@@ -146,10 +146,10 @@ goBack index (TimeLine model) =
 getRPCeventIndex : ClientId -> Int -> TimeLine serverModel serverMsg remoteServerMsg model msg -> Maybe Int
 getRPCeventIndex cid rpcid (TimeLine {rpcindices}) = Dict.get ((toString cid),rpcid) rpcindices
 
-getServerEventParentIndex : ServerEventType serverMsg remoteServerMsg -> TimeLine serverModel serverMsg remoteServerMsg model msg -> Maybe Int
+getServerEventParentIndex : ServerEventType serverModel serverMsg remoteServerMsg -> TimeLine serverModel serverMsg remoteServerMsg model msg -> Maybe Int
 getServerEventParentIndex eventType timeline = Maybe.map (\(_,index) -> index) (getServerEventParentIndexHelp eventType timeline)
 
-getServerEventParentIndexHelp : ServerEventType serverMsg remoteServerMsg -> TimeLine serverModel serverMsg remoteServerMsg model msg -> Maybe (RunCycle,Int)
+getServerEventParentIndexHelp : ServerEventType serverModel serverMsg remoteServerMsg -> TimeLine serverModel serverMsg remoteServerMsg model msg -> Maybe (RunCycle,Int)
 getServerEventParentIndexHelp eventType (TimeLine {serverParentIndices}) = case eventType of
   ServerMsgEvent serverMsgType _ -> case serverMsgType of
     ServerChildMsg parentid _ -> Dict.get parentid serverParentIndices.regular
@@ -202,7 +202,7 @@ numberOfClients (TimeLine {clients}) = Dict.size clients
 clients : TimeLine serverModel serverMsg remoteServerMsg model msg -> List ClientId
 clients (TimeLine {clients}) = clients |> Dict.values |> List.map (\(cid,_) -> cid)
 
-view : TimeLine serverModel serverMsg remoteServerMsg model msg -> List (Int, (RunCycle,Event serverMsg remoteServerMsg msg))
+view : TimeLine serverModel serverMsg remoteServerMsg model msg -> List (Int, (RunCycle,Event serverModel serverMsg remoteServerMsg msg))
 view (TimeLine model) =
   model.events
     |> Array.map (\(runCycle,event,_) -> (runCycle,event))

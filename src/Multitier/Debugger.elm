@@ -86,7 +86,7 @@ type alias PreviousState serverModel serverCmd model cmd =
 
 type PausedServerMessage serverModel serverMsg remoteServerMsg msg =
   PausedServerAppMsg ParentServerMsg serverMsg |
-  PausedRemoteServerAppMsg ClientId (serverModel -> (serverModel, Cmd serverMsg)) Int remoteServerMsg |
+  PausedRemoteServerAppMsg ClientId (serverModel -> (serverModel, Cmd serverMsg)) Int Int remoteServerMsg |
   PausedClientAppMsg (PausedClientMsg msg)
 
 type ResumeStrategy = FromPrevious | FromPaused
@@ -220,7 +220,7 @@ multicastSocketMsg msg ids = ServerWebSocket.multicast socketPath ids (Encode.en
 -- PROCEDURE
 
 type RemoteServerMsg remoteServerMsg model msg =
-  RemoteServerAppMsg RunCycle ClientId Int remoteServerMsg |
+  RemoteServerAppMsg RunCycle ClientId Int Int remoteServerMsg |
 
   StartDebugView ClientId | StopDebugView ClientId |
   PauseDebugger | ResumeDebugger | GoBackDebugger Int |
@@ -241,11 +241,8 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
 
   AddClientEvent cid rpcCount msgCount event model cmd parentMsg -> rpc Handle
     (\serverModel -> let debugger = serverModel.debugger in
-      case debugger.state of
-        Running ->
-          let newServerModel = { serverModel | debugger = { debugger | timeline = TimeLine.pushClientEvent debugger.runCycle cid rpcCount msgCount (event,model,cmd,parentMsg) debugger.timeline }} in
-            (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
-        Paused -> (serverModel, Task.succeed (), Cmd.none)) -- TODO what to do in this case? check runcycle?
+      let newServerModel = { serverModel | debugger = { debugger | timeline = TimeLine.pushClientEvent debugger.runCycle cid rpcCount msgCount (event,model,cmd,parentMsg) debugger.timeline }} in
+        (newServerModel, Task.succeed (), sendDebuggerModel newServerModel))
 
   AddPausedClientEvent runCycle (cid,parentMsg,maybeRPCid,msg) -> rpc Handle
     (\serverModel -> let debugger = serverModel.debugger in
@@ -294,33 +291,30 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
           in (newServerModel, Task.succeed (), Cmd.batch [newCmd, sendDebuggerModel newServerModel]))
 
 
-  RemoteServerAppMsg runCycle cid rpcid msg ->
+  RemoteServerAppMsg runCycle cid parentid rpcid msg ->
     RPC.map (AppMsg NoParentMsg runCycle (Just rpcid))
       (\updateAppModel serverModel -> let debugger = serverModel.debugger in
-        -- if runCycle < debugger.runCycle then
-        --   if TimeLine.isClientParentMember runCycle cid (parent) debugger.timeline then
-        --     case debugger.state of
-        --       Running -> updateServerAppModelFromRPC updateAppModel cid rpcid msg serverModel
-        --       Paused -> storePausedRPCMessage updateAppModel runCycle cid rpcid msg serverModel
-        --   else let test = Debug.log "RPC Message discarded because of previous runCycle and removed parent:" (toString msg) in serverModel ! [] -- Message discarded...
-        -- else case debugger.state of
-        --   Running -> updateServerAppModelFromRPC updateAppModel cid rpcid msg serverModel
-        --   Paused -> storePausedRPCMessage updateAppModel runCycle cid rpcid msg serverModel) TODO connect clientmsg -> rpc -> clientmsg
-        case serverModel.debugger.state of
-          Running -> updateServerAppModelFromRPC updateAppModel cid rpcid msg serverModel
-          Paused -> storePausedRPCMessage updateAppModel runCycle cid rpcid msg serverModel)
+        if runCycle < debugger.runCycle then
+          if TimeLine.isClientParentMember runCycle cid (RegularMsg parentid) debugger.timeline then
+            case debugger.state of
+              Running -> updateServerAppModelFromRPC updateAppModel cid parentid rpcid msg serverModel
+              Paused -> storePausedRPCMessage updateAppModel runCycle cid parentid rpcid msg serverModel
+          else let test = Debug.log "RPC Message discarded because of previous runCycle and removed parent:" (toString msg) in serverModel ! [] -- Message discarded...
+        else case debugger.state of
+          Running -> updateServerAppModelFromRPC updateAppModel cid parentid rpcid msg serverModel
+          Paused -> storePausedRPCMessage updateAppModel runCycle cid parentid rpcid msg serverModel)
       (\serverModel -> serverModel.debugger.appModel)
       (serverRPCs msg)
 
-updateServerAppModelFromRPC : (serverModel -> (serverModel,Cmd serverMsg)) -> ClientId -> Int -> remoteServerMsg -> ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
-updateServerAppModelFromRPC updateAppModel cid rpcid msg serverModel = let debugger = serverModel.debugger in
+updateServerAppModelFromRPC : (serverModel -> (serverModel,Cmd serverMsg)) -> ClientId -> Int -> Int -> remoteServerMsg -> ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
+updateServerAppModelFromRPC updateAppModel cid parentid rpcid msg serverModel = let debugger = serverModel.debugger in
   let (newAppModel,newAppCmd) = updateAppModel debugger.appModel in
-    let newServerModel = { serverModel | debugger = { debugger | appModel = newAppModel, timeline = TimeLine.pushServerEvent debugger.runCycle debugger.rpcMsgCount debugger.msgCount (ServerRPCevent cid rpcid msg, newAppModel, Cmd.none, (ServerRPC cid rpcid)) debugger.timeline }} in
+    let newServerModel = { serverModel | debugger = { debugger | appModel = newAppModel, timeline = TimeLine.pushServerEvent debugger.runCycle debugger.rpcMsgCount debugger.msgCount (ServerRPCevent cid parentid rpcid updateAppModel msg, newAppModel, Cmd.none, (ServerRPC cid rpcid)) debugger.timeline }} in
       newServerModel ! [Cmd.map (ServerAppMsg (ServerRPC cid rpcid) debugger.runCycle) newAppCmd, sendDebuggerModel newServerModel]
 
-storePausedRPCMessage : (serverModel -> (serverModel,Cmd serverMsg)) -> RunCycle -> ClientId -> Int -> remoteServerMsg -> ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
-storePausedRPCMessage updateAppModel runCycle cid rpcid msg serverModel = { serverModel | debugger = let debugger = serverModel.debugger in
-  { debugger | messagesReceivedDuringPaused = Array.push (runCycle, PausedRemoteServerAppMsg cid updateAppModel rpcid msg) debugger.messagesReceivedDuringPaused}} ! []
+storePausedRPCMessage : (serverModel -> (serverModel,Cmd serverMsg)) -> RunCycle -> ClientId -> Int -> Int -> remoteServerMsg -> ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
+storePausedRPCMessage updateAppModel runCycle cid parentid rpcid msg serverModel = { serverModel | debugger = let debugger = serverModel.debugger in
+  { debugger | messagesReceivedDuringPaused = Array.push (runCycle, PausedRemoteServerAppMsg cid updateAppModel parentid rpcid msg) debugger.messagesReceivedDuringPaused}} ! []
 
 resumeServerFromPaused : ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
 resumeServerFromPaused serverModel = updateServerWithPausedMessages (Array.toList serverModel.debugger.messagesReceivedDuringPaused) (serverModel, Cmd.none)
@@ -332,7 +326,7 @@ updateServerWithPausedMessages messages (serverModel, cmd) = let debugger = serv
     (runCycle,message) :: otherMessages ->
       let (newServerModel,newServerCmd) = case message of
         PausedServerAppMsg parentMsg serverAppMsg -> updateServerAppModel parentMsg serverAppMsg serverModel
-        PausedRemoteServerAppMsg cid updateAppModel rpcid remoteServerMsg -> updateServerAppModelFromRPC updateAppModel cid rpcid remoteServerMsg serverModel
+        PausedRemoteServerAppMsg cid updateAppModel parentid rpcid remoteServerMsg -> updateServerAppModelFromRPC updateAppModel cid parentid rpcid remoteServerMsg serverModel
         PausedClientAppMsg (cid,parentMsg,maybeRPCid,msg) -> (serverModel,cmd) in -- TODO
        updateServerWithPausedMessages otherMessages (newServerModel ! [cmd,newServerCmd])
 
@@ -345,28 +339,37 @@ resumeServerFromPrevious previous serverModel = let debugger = serverModel.debug
       |> (\model -> (model,Cmd.none))
       |> checkPaused previous (Array.toList serverModel.debugger.messagesReceivedDuringPaused)
 
-checkEvents : List (RunCycle, Event serverMsg remoteServerMsg msg) -> Int -> ServerModel serverModel serverMsg remoteServerMsg model msg -> ServerModel serverModel serverMsg remoteServerMsg model msg
+checkEvents : List (RunCycle, Event serverModel serverMsg remoteServerMsg msg) -> Int -> ServerModel serverModel serverMsg remoteServerMsg model msg -> ServerModel serverModel serverMsg remoteServerMsg model msg
 checkEvents eventsToCheck goBackIndex serverModel = case eventsToCheck of
   [] -> serverModel
-  (runCycle,event) :: otherEvents ->
+  (runCycle,event) :: otherEvents -> let debugger = serverModel.debugger in
     let newServerModel =
       case event of
         ServerEvent eventType ->
-          let handleEvent parent serverMsg =
-            if TimeLine.isServerParentMember runCycle parent serverModel.debugger.timeline || TimeLine.isServerParentMember serverModel.debugger.runCycle parent serverModel.debugger.timeline then
-              case TimeLine.getServerEventParentIndex eventType serverModel.debugger.timeline of
-                Just index -> case goBackIndex == index of
-                  False -> let (newServerModel,_) = updateServerAppModel parent serverMsg serverModel in newServerModel
-                  True -> let test = Debug.log "Message discarded because parent is the go back point:" (toString serverMsg) in serverModel -- Message discarded...
-                _ -> serverModel -- Not possible
-            else let test = Debug.log "Message discarded because parent does not exist in new timeline:" (toString serverMsg) in serverModel  -- Message discarded...
+          let handleServerEvent parent serverMsg =
+                if TimeLine.isServerParentMember runCycle parent debugger.timeline || TimeLine.isServerParentMember debugger.runCycle parent serverModel.debugger.timeline then
+                  case TimeLine.getServerEventParentIndex eventType debugger.timeline of
+                    Just index -> case goBackIndex == index of
+                      False -> let (newServerModel,_) = updateServerAppModel parent serverMsg serverModel in newServerModel
+                      True -> let test = Debug.log "Message discarded because parent is the go back point:" (toString serverMsg) in serverModel -- Message discarded...
+                    _ -> serverModel -- Not possible
+                else let test = Debug.log "Message discarded because parent does not exist in new timeline:" (toString serverMsg) in serverModel  -- Message discarded...
+              handleServerRPCevent cid parentid rpcid updateAppModel msg =
+                if TimeLine.isClientParentMember runCycle cid (RegularMsg parentid) debugger.timeline || TimeLine.isClientParentMember debugger.runCycle cid (RegularMsg parentid) debugger.timeline then
+                  case TimeLine.getServerEventParentIndex eventType debugger.timeline of
+                    Just index -> case goBackIndex == index of
+                      False -> let (newServerModel,_) = updateServerAppModelFromRPC updateAppModel cid parentid rpcid msg serverModel in newServerModel
+                      True -> let test = Debug.log "RPCMessage discarded because parent is the go back point:" (toString msg) in serverModel -- Message discarded...
+                    _ -> serverModel -- Not possible
+                else let test = Debug.log "RPCMessage discarded because parent does not exist in new timeline:" (toString msg) in serverModel  -- Message discarded...
+
           in case eventType of
             ServerMsgEvent msgType serverMsg -> case msgType of
-              NewServerMsg msgid -> handleEvent None serverMsg
-              ServerChildMsg parentid msgid -> handleEvent (RegularServerMsg parentid) serverMsg
-              RPCserverMsg cid rpcid rpcmsgid -> handleEvent (ServerRPC cid rpcid) serverMsg
-              RPCchildServerMsg (cid,rpcid,rpcmsgid) msgid -> handleEvent (ServerRPCmsg (cid,rpcid,rpcmsgid)) serverMsg
-            ServerRPCevent cid rpcid remoteServerMsg -> serverModel -- TODO check client parent still exists
+              NewServerMsg msgid -> handleServerEvent None serverMsg
+              ServerChildMsg parentid msgid -> handleServerEvent (RegularServerMsg parentid) serverMsg
+              RPCserverMsg cid rpcid rpcmsgid -> handleServerEvent (ServerRPC cid rpcid) serverMsg
+              RPCchildServerMsg (cid,rpcid,rpcmsgid) msgid -> handleServerEvent (ServerRPCmsg (cid,rpcid,rpcmsgid)) serverMsg
+            ServerRPCevent cid parentid rpcid updateAppModel remoteServerMsg -> handleServerRPCevent cid parentid rpcid updateAppModel remoteServerMsg
             _ -> serverModel
         ClientEvent cid eventType -> serverModel --TODO
           -- case eventType of
@@ -391,8 +394,8 @@ checkPaused previous messages (serverModel,cmd) = let debugger = serverModel.deb
           let (newServerModel,newServerCmd) = updateServerAppModel parentMsg serverAppMsg serverModel in
             newServerModel ! [cmd,newServerCmd]
         else let test = Debug.log "Message discarded because parent does not exist in new timeline:" (toString serverAppMsg) in (serverModel,cmd) -- Message discarded...
-      PausedRemoteServerAppMsg cid updateAppModel rpcid remoteServerMsg ->
-        let (newServerModel,newServerCmd) = updateServerAppModelFromRPC updateAppModel cid rpcid remoteServerMsg serverModel in -- TODO check client parent still exists
+      PausedRemoteServerAppMsg cid updateAppModel parentid rpcid remoteServerMsg ->
+        let (newServerModel,newServerCmd) = updateServerAppModelFromRPC updateAppModel cid parentid rpcid remoteServerMsg serverModel in -- TODO check client parent still exists
           newServerModel ! [cmd,newServerCmd]
       PausedClientAppMsg (cid,parentMsg,maybeRPCid,msg) -> (serverModel,cmd) -- TODO
 
@@ -559,14 +562,21 @@ updateAppModel update appMsg parentMsg cid rpcid cmodel =
           RegularMsg parentId ->
             let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds cid (RegularMsg cmodel.msgCount) cmodel newCmd in
               { rpcWrappedModel | appModel = newAppModel, msgCount = cmodel.msgCount + 1 } !! [rpcWrappedCmds, performOnServer (AddClientEvent cid cmodel.rpccounter (cmodel.msgCount + 1) (MsgEvent (ClientChildMsg parentId cmodel.msgCount) rpcid rpcIds appMsg) newAppModel newCmd (RegularMsg cmodel.msgCount))]
-    _ -> cmodel !! [performOnServer (AddPausedClientEvent cmodel.runCycle (cid,parentMsg,rpcid,appMsg))]
+    ClientPaused -> case parentMsg of
+      RegularMsg _ -> cmodel !! [performOnServer (AddPausedClientEvent cmodel.runCycle (cid,parentMsg,rpcid,appMsg))]
+      _ -> cmodel !! []
+    _ -> cmodel !! []
 
 wrapRPCcmds : ClientId -> ParentMsg -> ClientDebuggerModel model -> MultitierCmd remoteServerMsg msg -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg), List Int)
-wrapRPCcmds cid parentMsg model cmd = case cmd of
-  ServerCmd remoteServerMsg -> ({ model | rpccounter = model.rpccounter + 1 }, Multitier.map (RemoteServerAppMsg model.runCycle cid model.rpccounter) (AppMsg parentMsg model.runCycle Maybe.Nothing) cmd, [model.rpccounter])
-  ClientCmd _ -> (model, Multitier.map (RemoteServerAppMsg model.runCycle cid model.rpccounter) (AppMsg parentMsg model.runCycle Maybe.Nothing) cmd, [])
-  Batch cmds -> List.foldl (\currentCmd (prevModel, prevCmd, prevRPCids) -> let (newModel, newCmd, newRPCids) = (wrapRPCcmds cid parentMsg prevModel currentCmd) in
-                                                                    (newModel, Multitier.batch [newCmd,prevCmd], List.append prevRPCids newRPCids)) (model,Multitier.none,[]) cmds
+wrapRPCcmds cid parentMsg model cmd =
+  let parentId = case parentMsg of
+    NoParentMsg -> 0
+    RegularMsg id -> id in
+  case cmd of
+    ServerCmd remoteServerMsg -> ({ model | rpccounter = model.rpccounter + 1 }, Multitier.map (RemoteServerAppMsg model.runCycle cid parentId model.rpccounter) (AppMsg parentMsg model.runCycle Maybe.Nothing) cmd, [model.rpccounter])
+    ClientCmd _ -> (model, Multitier.map (RemoteServerAppMsg model.runCycle cid parentId model.rpccounter) (AppMsg parentMsg model.runCycle Maybe.Nothing) cmd, [])
+    Batch cmds -> List.foldl (\currentCmd (prevModel, prevCmd, prevRPCids) -> let (newModel, newCmd, newRPCids) = (wrapRPCcmds cid parentMsg prevModel currentCmd) in
+                                                                      (newModel, Multitier.batch [newCmd,prevCmd], List.append prevRPCids newRPCids)) (model,Multitier.none,[]) cmds
 
 -- SUBSCRIPTIONS
 
@@ -635,7 +645,7 @@ wrapView appView = \model -> case model of
         eventsView smodel,
         Html.pre [] [Html.text (toString (Array.map (\(runCycle,message) -> case message of
           PausedServerAppMsg parent serverMsg -> ("PausedServerAppMsg parent:(" ++ (toString parent) ++")-" ++ (toString serverMsg))
-          PausedRemoteServerAppMsg cid _ rpcid remoteServerMsg -> ("PausedRemoteServerAppMsg cid:(" ++ (toString cid) ++ "," ++ (toString rpcid) ++")-" ++ (toString remoteServerMsg))
+          PausedRemoteServerAppMsg cid _ parentid rpcid remoteServerMsg -> ("PausedRemoteServerAppMsg cid:(" ++ (toString cid) ++ "," ++ (toString rpcid) ++")-" ++ (toString remoteServerMsg))
           PausedClientAppMsg (cid,parentMsg,maybeRPCid,msg) -> ("PausedClientAppMsg cid:(" ++ (toString cid) ++ ",parent:"  ++ (toString parentMsg) ++ ",rpc:" ++ (toString maybeRPCid) ++ ")-" ++ (toString msg))
            ) smodel.messagesReceivedDuringPaused))],
         timelineView smodel]
@@ -736,7 +746,7 @@ type alias ActionProps msg =
   , btnText: String
   , hideResumeFrom: Bool }
 
-eventView : RunCycle -> Event serverMsg remoteServerMsg msg -> String
+eventView : RunCycle -> Event serverModel serverMsg remoteServerMsg msg -> String
 eventView runCycle event = case event of
   ClientEvent cid cevent -> clientEventView runCycle cid cevent
   ServerEvent sevent -> serverEventView runCycle sevent
@@ -754,7 +764,7 @@ clientEventView runCycle cid event = "(" ++ (toString runCycle) ++ ")" ++
         NewClientMsg msgid -> "[NewMsg-"++ (toString cid) ++ "-" ++ (toString msgid) ++ "-" ++ (toString rpcids) ++"] " ++ (toString msg)
         ClientChildMsg parentid msgid -> "[ChildMsg-"++ (toString cid) ++ "-(" ++ (toString parentid) ++ "," ++ (toString msgid) ++ ")-" ++ (toString rpcids) ++"] " ++ (toString msg)
 
-serverEventView : RunCycle -> ServerEventType serverMsg remoteServerMsg -> String
+serverEventView : RunCycle -> ServerEventType serverModel serverMsg remoteServerMsg -> String
 serverEventView runCycle event = "(" ++ (toString runCycle) ++ ")" ++
   case event of
     InitServerEvent -> "[Init-Server]"
@@ -763,7 +773,7 @@ serverEventView runCycle event = "(" ++ (toString runCycle) ++ ")" ++
       ServerChildMsg parentid msgid -> "[ChildServerMsg](" ++ (toString parentid) ++ "," ++ (toString msgid) ++ ")" ++ (toString msg)
       RPCserverMsg cid rpcid rpcmsgid -> "[RPCserverMsg](" ++ (toString cid) ++ "," ++ (toString rpcid) ++ "," ++ (toString rpcmsgid) ++")" ++ (toString msg)
       RPCchildServerMsg (cid,rpcid, rpcmsgid) msgid -> "[RPCchildServerMsg]((" ++ (toString cid) ++ "," ++ (toString rpcid) ++ "," ++ (toString rpcmsgid) ++")," ++ (toString msgid) ++")" ++ (toString msg)
-    ServerRPCevent cid rpcid msg -> "[RP-" ++ (toString cid) ++"-" ++ (toString rpcid) ++"] " ++ (toString msg)
+    ServerRPCevent cid parentid rpcid _ msg -> "[RP-" ++ (toString cid) ++"-" ++ "," ++ "client-parent-id:" ++ (toString parentid) ++ "," ++(toString rpcid) ++"] " ++ (toString msg)
 
 serverActions : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> ActionProps (Msg model msg serverModel serverMsg remoteServerMsg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 serverActions model props = Html.div [] [
