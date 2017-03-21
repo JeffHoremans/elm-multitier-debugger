@@ -558,7 +558,7 @@ pauseClient : ClientDebuggerModel model -> (ClientDebuggerModel model, Multitier
 pauseClient cmodel = { cmodel | state = ClientPaused } !! []
 
 resumeClientFromPaused : Maybe (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg)) -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
-resumeClientFromPaused maybeNewModel cmodel = case maybeNewModel of
+resumeClientFromPaused maybeNewModel cmodel = let test = Debug.log "resuming client from paused" (toString maybeNewModel) in case maybeNewModel of
   Just (newModel,newCmd) -> { newModel | state = ClientRunning } !! [newCmd]
   _ -> { cmodel | state = ClientRunning } !! []
 
