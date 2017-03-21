@@ -322,6 +322,7 @@ storePausedRPCMessage updateAppModel runCycle cid parentid rpcid msg serverModel
 resumeServerFromPaused : ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
 resumeServerFromPaused serverModel = let debugger = serverModel.debugger in
   let ((newServerModel,newServerCmd), clients) = updateServerWithPausedMessages (Array.toList serverModel.debugger.messagesReceivedDuringPaused) ((serverModel, Cmd.none),Dict.empty) in
+    let test = Debug.log "clients" (toString clients) in
     { newServerModel | debugger = { debugger | state = Running, messagesReceivedDuringPaused = Array.empty }} ! [newServerCmd, broadcastResumeFromPausedAction clients newServerModel]
 
 updateServerWithPausedMessages :
@@ -558,7 +559,7 @@ pauseClient : ClientDebuggerModel model -> (ClientDebuggerModel model, Multitier
 pauseClient cmodel = { cmodel | state = ClientPaused } !! []
 
 resumeClientFromPaused : Maybe (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg)) -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg))
-resumeClientFromPaused maybeNewModel cmodel = let test = Debug.log "resuming client from paused" (toString maybeNewModel) in case maybeNewModel of
+resumeClientFromPaused maybeNewModel cmodel = case maybeNewModel of
   Just (newModel,newCmd) -> { newModel | state = ClientRunning } !! [newCmd]
   _ -> { cmodel | state = ClientRunning } !! []
 
