@@ -329,9 +329,9 @@ updateServerWithPausedMessages messages (serverModel, cmd) = let debugger = serv
 
 resumeServerFromPrevious : PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg) -> ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
 resumeServerFromPrevious previous serverModel = let debugger = serverModel.debugger in
-  let newServerModel = { serverModel | debugger = { debugger | appModel = previous.appModel, runCycle = debugger.runCycle + 1, msgCount = previous.msgCount, rpcMsgCount = previous.rpcMsgCount }}
-      (newTimeline, eventsToCheck) = TimeLine.goBack previous.index debugger.timeline
+  let (newTimeline, eventsToCheck) = TimeLine.goBack previous.index debugger.timeline
       messagesReceivedDuringPaused = debugger.messagesReceivedDuringPaused |> Array.toList in
+   let newServerModel = { serverModel | debugger = { debugger | timeline = newTimeline, appModel = previous.appModel, runCycle = debugger.runCycle + 1, msgCount = previous.msgCount, rpcMsgCount = previous.rpcMsgCount }} in
     checkEvents eventsToCheck previous.index newServerModel
       |> (\model -> (model,Cmd.none))
       |> checkPaused previous (Array.toList serverModel.debugger.messagesReceivedDuringPaused)
