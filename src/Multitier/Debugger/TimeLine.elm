@@ -95,11 +95,11 @@ pushServerEvent runCycle rpcMsgCount msgCount (serverEvent, serverModel, serverC
   let value = (runCycle,currentIndex) in
   let newServer = (serverModel, serverCmd, parentMsg, rpcMsgCount, msgCount)
       newRPCindices = case serverEvent of
-        ServerRPCevent cid rpcid _ _ _ -> Dict.insert ((toString cid), rpcid) currentIndex rpcindices
+        ServerRPCevent cid parentid rpcid _ _ -> Dict.insert ((toString cid), rpcid) currentIndex rpcindices
         _ -> rpcindices
       newParentIndices = case serverEvent of
          InitServerEvent -> { serverParentIndices | regular = Dict.insert 0 value serverParentIndices.regular}
-         ServerRPCevent cid rpcid _ _ _ -> { serverParentIndices | rpc = Dict.insert ((toString cid),rpcid) value serverParentIndices.rpc}
+         ServerRPCevent cid parentid rpcid _ _ -> { serverParentIndices | rpc = Dict.insert ((toString cid),rpcid) value serverParentIndices.rpc}
          ServerMsgEvent serverMsgType _ -> case serverMsgType of
            NewServerMsg msgid -> { serverParentIndices | regular = Dict.insert msgid value serverParentIndices.regular}
            ServerChildMsg _ msgid -> { serverParentIndices | regular = Dict.insert msgid value serverParentIndices.regular}
