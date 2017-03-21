@@ -320,9 +320,10 @@ storePausedRPCMessage updateAppModel runCycle cid parentid rpcid msg serverModel
   { debugger | messagesReceivedDuringPaused = Array.push (runCycle, PausedRemoteServerAppMsg cid updateAppModel parentid rpcid msg) debugger.messagesReceivedDuringPaused}} ! []
 
 resumeServerFromPaused : ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
-resumeServerFromPaused serverModel = let debugger = serverModel.debugger in
+resumeServerFromPaused serverModel =
   let ((newServerModel,newServerCmd), clients) = updateServerWithPausedMessages (Array.toList serverModel.debugger.messagesReceivedDuringPaused) ((serverModel, Cmd.none),Dict.empty) in
-    { newServerModel | debugger = { debugger | state = Running, messagesReceivedDuringPaused = Array.empty }} ! [newServerCmd, broadcastResumeFromPausedAction clients newServerModel]
+    let debugger = newServerModel.debugger in
+      { newServerModel | debugger = { debugger | state = Running, messagesReceivedDuringPaused = Array.empty }} ! [newServerCmd, broadcastResumeFromPausedAction clients newServerModel]
 
 updateServerWithPausedMessages :
   List (RunCycle, PausedServerMessage serverModel serverMsg remoteServerMsg msg) ->
