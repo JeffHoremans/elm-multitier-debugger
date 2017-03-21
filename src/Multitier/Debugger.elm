@@ -86,7 +86,8 @@ type alias PreviousState serverModel serverCmd model cmd =
 
 type PausedServerMessage serverModel serverMsg remoteServerMsg msg =
   PausedServerAppMsg ParentServerMsg serverMsg |
-  PausedRemoteServerAppMsg ClientId (serverModel -> (serverModel, Cmd serverMsg)) Int remoteServerMsg
+  PausedRemoteServerAppMsg ClientId (serverModel -> (serverModel, Cmd serverMsg)) Int remoteServerMsg |
+  PausedClientAppMsg (PausedClientMsg msg)
 
 type ResumeStrategy = FromPrevious | FromPaused
 
@@ -225,8 +226,8 @@ type RemoteServerMsg remoteServerMsg model msg =
   PauseDebugger | ResumeDebugger | GoBackDebugger Int |
   SetDebuggerResumeStrategy ResumeStrategy | ToggleShowParentageDebugger Bool |
 
-  AddClientEvent ClientId Int Int (ClientEventType msg) model (MultitierCmd remoteServerMsg msg) ParentMsg
-  -- AddPausedClientEvent ClientId Int Int (ClientEventType msg) model (Multitiercmd remoteServerMsg msg)
+  AddClientEvent ClientId Int Int (ClientEventType msg) model (MultitierCmd remoteServerMsg msg) ParentMsg |
+  AddPausedClientEvent RunCycle (PausedClientMsg msg)
 
 wrapServerRPCs : (remoteServerMsg -> RPC serverModel msg serverMsg) -> (RemoteServerMsg remoteServerMsg model msg -> RPC (ServerModel serverModel serverMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) (ServerMsg serverMsg))
 wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
@@ -244,7 +245,14 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
         Running ->
           let newServerModel = { serverModel | debugger = { debugger | timeline = TimeLine.pushClientEvent debugger.runCycle cid rpcCount msgCount (event,model,cmd,parentMsg) debugger.timeline }} in
             (newServerModel, Task.succeed (), sendDebuggerModel newServerModel)
-        Paused -> (serverModel, Task.succeed (), Cmd.none)) -- TODO what to do in this case?
+        Paused -> (serverModel, Task.succeed (), Cmd.none)) -- TODO what to do in this case? check runcycle?
+
+  AddPausedClientEvent runCycle (cid,parentMsg,maybeRPCid,msg) -> rpc Handle
+    (\serverModel -> let debugger = serverModel.debugger in
+      case debugger.state of
+        Running -> (serverModel, Task.succeed (), Cmd.none) -- TODO what to do in this case?
+        Paused -> let newServerModel = { serverModel | debugger = { debugger | messagesReceivedDuringPaused = Array.push (runCycle, PausedClientAppMsg (cid,parentMsg,maybeRPCid,msg)) debugger.messagesReceivedDuringPaused }} in
+          (newServerModel, Task.succeed (), Cmd.none))
 
   PauseDebugger -> rpc Handle
     (\serverModel -> case serverModel.debugger.state of
@@ -324,7 +332,8 @@ updateServerWithPausedMessages messages (serverModel, cmd) = let debugger = serv
     (runCycle,message) :: otherMessages ->
       let (newServerModel,newServerCmd) = case message of
         PausedServerAppMsg parentMsg serverAppMsg -> updateServerAppModel parentMsg serverAppMsg serverModel
-        PausedRemoteServerAppMsg cid updateAppModel rpcid remoteServerMsg -> updateServerAppModelFromRPC updateAppModel cid rpcid remoteServerMsg serverModel in
+        PausedRemoteServerAppMsg cid updateAppModel rpcid remoteServerMsg -> updateServerAppModelFromRPC updateAppModel cid rpcid remoteServerMsg serverModel
+        PausedClientAppMsg (cid,parentMsg,maybeRPCid,msg) -> (serverModel,cmd) in -- TODO
        updateServerWithPausedMessages otherMessages (newServerModel ! [cmd,newServerCmd])
 
 resumeServerFromPrevious : PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg) -> ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
@@ -385,6 +394,7 @@ checkPaused previous messages (serverModel,cmd) = let debugger = serverModel.deb
       PausedRemoteServerAppMsg cid updateAppModel rpcid remoteServerMsg ->
         let (newServerModel,newServerCmd) = updateServerAppModelFromRPC updateAppModel cid rpcid remoteServerMsg serverModel in -- TODO check client parent still exists
           newServerModel ! [cmd,newServerCmd]
+      PausedClientAppMsg (cid,parentMsg,maybeRPCid,msg) -> (serverModel,cmd) -- TODO
 
 -- SERVER-STATE
 
@@ -438,6 +448,8 @@ type alias InitData =
   { cid: ClientId
   , paused: Bool
   , runCycle: RunCycle }
+
+type alias PausedClientMsg msg = (ClientId,ParentMsg,(Maybe Int),msg)
 
 type SocketMsg serverModel serverMsg remoteServerMsg model msg =
   InitializeClient InitData |
@@ -547,7 +559,7 @@ updateAppModel update appMsg parentMsg cid rpcid cmodel =
           RegularMsg parentId ->
             let (rpcWrappedModel, rpcWrappedCmds, rpcIds) = wrapRPCcmds cid (RegularMsg cmodel.msgCount) cmodel newCmd in
               { rpcWrappedModel | appModel = newAppModel, msgCount = cmodel.msgCount + 1 } !! [rpcWrappedCmds, performOnServer (AddClientEvent cid cmodel.rpccounter (cmodel.msgCount + 1) (MsgEvent (ClientChildMsg parentId cmodel.msgCount) rpcid rpcIds appMsg) newAppModel newCmd (RegularMsg cmodel.msgCount))]
-    _ -> cmodel !! [] -- TODO store messages
+    _ -> cmodel !! [performOnServer (AddPausedClientEvent cmodel.runCycle (cid,parentMsg,rpcid,appMsg))]
 
 wrapRPCcmds : ClientId -> ParentMsg -> ClientDebuggerModel model -> MultitierCmd remoteServerMsg msg -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg), List Int)
 wrapRPCcmds cid parentMsg model cmd = case cmd of
@@ -624,7 +636,7 @@ wrapView appView = \model -> case model of
         Html.pre [] [Html.text (toString (Array.map (\(runCycle,message) -> case message of
           PausedServerAppMsg parent serverMsg -> ("PausedServerAppMsg parent:(" ++ (toString parent) ++")-" ++ (toString serverMsg))
           PausedRemoteServerAppMsg cid _ rpcid remoteServerMsg -> ("PausedRemoteServerAppMsg cid:(" ++ (toString cid) ++ "," ++ (toString rpcid) ++")-" ++ (toString remoteServerMsg))
-          -- PausedClientAppMsg cid parent maybeRPCid msg -> ("PausedClientAppMsg cid:(" ++ (toString cid) ++ ",parent:"  ++ (toString parent) ++ ",rpc:" ++ (toString maybeRPCid) ++ ")-" ++ (toString msg))
+          PausedClientAppMsg (cid,parentMsg,maybeRPCid,msg) -> ("PausedClientAppMsg cid:(" ++ (toString cid) ++ ",parent:"  ++ (toString parentMsg) ++ ",rpc:" ++ (toString maybeRPCid) ++ ")-" ++ (toString msg))
            ) smodel.messagesReceivedDuringPaused))],
         timelineView smodel]
       in case smodel.state of
