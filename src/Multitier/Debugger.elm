@@ -340,7 +340,7 @@ checkEvents : List (RunCycle, Event serverMsg remoteServerMsg msg) -> Int -> Ser
 checkEvents eventsToCheck goBackIndex serverModel = case eventsToCheck of
   [] -> serverModel
   (runCycle,event) :: otherEvents ->
-    let result =
+    let newServerModel =
       case event of
         ServerEvent eventType ->
           let handleEvent parent serverMsg =
@@ -350,7 +350,7 @@ checkEvents eventsToCheck goBackIndex serverModel = case eventsToCheck of
                   False -> let (newServerModel,_) = updateServerAppModel parent serverMsg serverModel in newServerModel
                   True -> let test = Debug.log "Message discarded because parent is the go back point:" (toString serverMsg) in serverModel -- Message discarded...
                 _ -> serverModel -- Not possible
-            else let test = Debug.log "Message discarded because parent does not exist in new timeline:" (toString serverMsg) in serverModel  -- Message discarded...
+            else let test = Debug.log "Message discarded because parent does not exist in new timeline:" (toString serverModel.debugger.timeline) in serverModel  -- Message discarded...
           in case eventType of
             ServerMsgEvent msgType serverMsg -> case msgType of
               NewServerMsg msgid -> handleEvent None serverMsg
@@ -365,7 +365,7 @@ checkEvents eventsToCheck goBackIndex serverModel = case eventsToCheck of
           --   MsgEvent msgType maybeRPCid ids msg -> case msgType of
           --     NewClientMsg msgid -> (serverModel,cmd)
           --     ClientChildMsg parentid msgid -> (serverModel,cmd)
-    in checkEvents otherEvents goBackIndex result
+    in checkEvents otherEvents goBackIndex newServerModel
 
 checkPaused :
   PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg) ->
