@@ -339,14 +339,14 @@ updateServerWithPausedMessages messages ((serverModel, cmd), clients) = let debu
         PausedClientAppMsg (cid,parentMsg,maybeRPCid,msg) -> case Dict.get (toString cid) clients of
           Just (clientModel, clientCmd) ->
             let (newClientModel,newClientCmd) = updateAppModel serverModel.updateClient msg parentMsg cid maybeRPCid clientModel in
-              ((serverModel,cmd), (Dict.insert (toString cid) (newClientModel,newClientCmd) clients))
+              ((serverModel,Cmd.none), (Dict.insert (toString cid) (newClientModel,newClientCmd) clients))
           _ -> let (_, _, _,_, _, previousClients) = TimeLine.previousState ((TimeLine.length debugger.timeline) - 1) debugger.timeline in
             case Dict.get (toString cid) previousClients of
               Just (cid, (previousAppModel, _, _, previousRpcMsgCount, previousMsgCount)) ->
                 let clientModel = ClientDebuggerModel ClientPaused previousAppModel debugger.runCycle previousRpcMsgCount previousMsgCount in
                   let (newClientModel,newClientCmd) = updateAppModel serverModel.updateClient msg parentMsg cid maybeRPCid clientModel in
-                    ((serverModel,cmd),(Dict.insert (toString cid) (newClientModel,newClientCmd) clients))
-              _ -> ((serverModel,cmd), clients)
+                    ((serverModel,Cmd.none),(Dict.insert (toString cid) (newClientModel,newClientCmd) clients))
+              _ -> ((serverModel,Cmd.none), clients)
       in updateServerWithPausedMessages otherMessages ((newServerModel ! [cmd,newServerCmd]), newClients)
 
 resumeServerFromPrevious : PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg) -> ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
