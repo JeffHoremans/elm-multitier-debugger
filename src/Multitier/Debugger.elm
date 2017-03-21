@@ -322,7 +322,6 @@ storePausedRPCMessage updateAppModel runCycle cid parentid rpcid msg serverModel
 resumeServerFromPaused : ServerModel serverModel serverMsg remoteServerMsg model msg -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
 resumeServerFromPaused serverModel = let debugger = serverModel.debugger in
   let ((newServerModel,newServerCmd), clients) = updateServerWithPausedMessages (Array.toList serverModel.debugger.messagesReceivedDuringPaused) ((serverModel, Cmd.none),Dict.empty) in
-    let test = Debug.log "clients" (toString clients) in
     { newServerModel | debugger = { debugger | state = Running, messagesReceivedDuringPaused = Array.empty }} ! [newServerCmd, broadcastResumeFromPausedAction clients newServerModel]
 
 updateServerWithPausedMessages :
@@ -340,7 +339,7 @@ updateServerWithPausedMessages messages ((serverModel, cmd), clients) = let debu
           Just (clientModel, clientCmd) ->
             let (newClientModel,newClientCmd) = updateAppModel serverModel.updateClient msg parentMsg cid maybeRPCid clientModel in
               ((serverModel,cmd), (Dict.insert (toString cid) (newClientModel,newClientCmd) clients))
-          _ -> let (_, _, _,_, _, previousClients) = TimeLine.previousState (TimeLine.length debugger.timeline) debugger.timeline in
+          _ -> let (_, _, _,_, _, previousClients) = TimeLine.previousState ((TimeLine.length debugger.timeline) - 1) debugger.timeline in
             case Dict.get (toString cid) previousClients of
               Just (cid, (previousAppModel, _, _, previousRpcMsgCount, previousMsgCount)) ->
                 let clientModel = ClientDebuggerModel ClientPaused previousAppModel debugger.runCycle previousRpcMsgCount previousMsgCount in
