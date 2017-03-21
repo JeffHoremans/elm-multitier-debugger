@@ -750,7 +750,7 @@ serverEventView runCycle event = "(" ++ (toString runCycle) ++ ")" ++
       NewServerMsg msgid -> "[NewServerMsg](" ++ (toString msgid) ++ ")" ++ (toString msg)
       ServerChildMsg parentid msgid -> "[ChildServerMsg](" ++ (toString parentid) ++ "," ++ (toString msgid) ++ ")" ++ (toString msg)
       RPCserverMsg cid rpcid rpcmsgid -> "[RPCserverMsg](" ++ (toString cid) ++ "," ++ (toString rpcid) ++ "," ++ (toString rpcmsgid) ++")" ++ (toString msg)
-      RPCchildServerMsg (cid,rpcid, rpcmsgid) msgid -> "[RPCserverMsg]((" ++ (toString cid) ++ "," ++ (toString rpcid) ++ "," ++ (toString rpcmsgid) ++")," ++ (toString msgid) ++")" ++ (toString msg)
+      RPCchildServerMsg (cid,rpcid, rpcmsgid) msgid -> "[RPCchildServerMsg]((" ++ (toString cid) ++ "," ++ (toString rpcid) ++ "," ++ (toString rpcmsgid) ++")," ++ (toString msgid) ++")" ++ (toString msg)
     ServerRPCevent cid rpcid msg -> "[RP-" ++ (toString cid) ++"-" ++ (toString rpcid) ++"] " ++ (toString msg)
 
 serverActions : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> ActionProps (Msg model msg serverModel serverMsg remoteServerMsg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
