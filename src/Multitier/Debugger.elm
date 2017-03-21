@@ -332,12 +332,13 @@ resumeServerFromPrevious previous serverModel = let debugger = serverModel.debug
   let newServerModel = { serverModel | debugger = { debugger | appModel = previous.appModel, runCycle = debugger.runCycle + 1, msgCount = previous.msgCount, rpcMsgCount = previous.rpcMsgCount }}
       (newTimeline, eventsToCheck) = TimeLine.goBack previous.index debugger.timeline
       messagesReceivedDuringPaused = debugger.messagesReceivedDuringPaused |> Array.toList in
-    checkEvents eventsToCheck previous.index (newServerModel, Cmd.none)
+    checkEvents eventsToCheck previous.index newServerModel
+      |> (\model -> (model,Cmd.none))
       |> checkPaused previous (Array.toList serverModel.debugger.messagesReceivedDuringPaused)
 
-checkEvents : List (RunCycle, Event serverMsg remoteServerMsg msg) -> Int -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg)) -> (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
-checkEvents eventsToCheck goBackIndex (serverModel,cmd) = case eventsToCheck of
-  [] -> (serverModel,cmd)
+checkEvents : List (RunCycle, Event serverMsg remoteServerMsg msg) -> Int -> ServerModel serverModel serverMsg remoteServerMsg model msg -> ServerModel serverModel serverMsg remoteServerMsg model msg
+checkEvents eventsToCheck goBackIndex serverModel = case eventsToCheck of
+  [] -> serverModel
   (runCycle,event) :: otherEvents ->
     let result =
       case event of
@@ -346,19 +347,19 @@ checkEvents eventsToCheck goBackIndex (serverModel,cmd) = case eventsToCheck of
             if TimeLine.isServerParentMember runCycle parent serverModel.debugger.timeline then
               case TimeLine.getServerEventParentIndex eventType serverModel.debugger.timeline of
                 Just index -> case goBackIndex == index of
-                  False -> let (newServerModel,newServerCmd) = updateServerAppModel parent serverMsg serverModel in (newServerModel ! [cmd,newServerCmd])
-                  True -> let test = Debug.log "Message discarded because parent is the go back point:" (toString serverMsg) in (serverModel,cmd) -- Message discarded...
-                _ -> (serverModel,cmd) -- Not possible
-            else let test = Debug.log "Message discarded because parent does not exist in new timeline:" (toString serverMsg) in (serverModel,cmd)  -- Message discarded...
+                  False -> let (newServerModel,_) = updateServerAppModel parent serverMsg serverModel in newServerModel
+                  True -> let test = Debug.log "Message discarded because parent is the go back point:" (toString serverMsg) in serverModel -- Message discarded...
+                _ -> serverModel -- Not possible
+            else let test = Debug.log "Message discarded because parent does not exist in new timeline:" (toString serverMsg) in serverModel  -- Message discarded...
           in case eventType of
             ServerMsgEvent msgType serverMsg -> case msgType of
               NewServerMsg msgid -> handleEvent None serverMsg
               ServerChildMsg parentid msgid -> handleEvent (RegularServerMsg parentid) serverMsg
               RPCserverMsg cid rpcid rpcmsgid -> handleEvent (ServerRPC cid rpcid) serverMsg
               RPCchildServerMsg (cid,rpcid,rpcmsgid) msgid -> handleEvent (ServerRPCmsg (cid,rpcid,rpcmsgid)) serverMsg
-            ServerRPCevent cid rpcid remoteServerMsg -> (serverModel,cmd) -- TODO check client parent still exists
-            _ -> (serverModel,cmd)
-        ClientEvent cid eventType -> (serverModel,cmd) --TODO
+            ServerRPCevent cid rpcid remoteServerMsg -> serverModel -- TODO check client parent still exists
+            _ -> serverModel
+        ClientEvent cid eventType -> serverModel --TODO
           -- case eventType of
           --   Init ids -> (serverModel,cmd)
           --   MsgEvent msgType maybeRPCid ids msg -> case msgType of
