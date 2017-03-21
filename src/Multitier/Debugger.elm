@@ -576,8 +576,8 @@ handleAppMsg update appMsg parentMsg cid cmodel =
   case cmodel.state of
     ClientRunning -> updateAppModel update appMsg parentMsg cid cmodel
     ClientPaused -> case parentMsg of
-      RegularMsg _ -> cmodel !! [performOnServer (AddPausedClientEvent cmodel.runCycle (cid,parentMsg,appMsg))]
-      _ -> cmodel !! []
+      NoParentMsg -> cmodel !! []
+      _ -> cmodel !! [performOnServer (AddPausedClientEvent cmodel.runCycle (cid,parentMsg,appMsg))]
     _ -> cmodel !! []
 
 updateAppModel : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> msg -> ParentMsg -> ClientId -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
