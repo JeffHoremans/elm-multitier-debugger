@@ -767,7 +767,10 @@ wrapView appView = \model -> case model of
           view []
         ClientPaused ->
           view [disabled True, style [("opacity", "0.25")]]
-        ClientUnvalid -> Html.text "Client is not valid anymore... Refresh to start a new client session."
+        ClientUnvalid -> Html.div [] [
+          Html.text "Client is not valid anymore... Refresh to start a new client session or...",
+          Html.br [] [],
+          Html.button [onClick SwitchDebugger] [Html.text "Switch to server debugger"]]
 
   Switching cid smodel -> Html.text "Switching to server debugger..."
 
