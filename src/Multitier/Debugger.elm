@@ -555,12 +555,14 @@ wrapUpdate update = \msg model -> case model of
     AppMsg parent runCycle appMsg -> let (newcmodel, cmd) = handleAppMsg update runCycle appMsg parent cid cmodel in ClientDebugger cid newcmodel !! [cmd]
     ParentStillMember runCycle _ parentMsg appMsg result -> let (newcmodel, cmd) = handleParentStillMember update runCycle cid parentMsg appMsg result cmodel in ClientDebugger cid newcmodel !! [cmd]
 
-    OnSocketMsg data -> case (fromJSONString data) of
-      PauseClient -> let (newcmodel, cmd) = pauseClient cmodel in ClientDebugger cid newcmodel !! [cmd]
-      ResumeClientFromPaused resume -> let (newcmodel, cmd) = resumeClientFromPaused resume cmodel in ClientDebugger cid newcmodel !! [cmd]
-      ResumeClientFromPrevious resume -> let (newcmodel, cmd) = resumeClientFromPrevious cid resume cmodel in ClientDebugger cid newcmodel !! [cmd]
-      InvalidateClient -> ClientDebugger cid { cmodel | state = ClientUnvalid } !! []
-      _ -> model !! []
+    OnSocketMsg data -> case cmodel.state of
+      ClientUnvalid -> model !! []
+      _ -> case (fromJSONString data) of
+        PauseClient -> let (newcmodel, cmd) = pauseClient cmodel in ClientDebugger cid newcmodel !! [cmd]
+        ResumeClientFromPaused resume -> let (newcmodel, cmd) = resumeClientFromPaused resume cmodel in ClientDebugger cid newcmodel !! [cmd]
+        ResumeClientFromPrevious resume -> let (newcmodel, cmd) = resumeClientFromPrevious cid resume cmodel in ClientDebugger cid newcmodel !! [cmd]
+        InvalidateClient -> ClientDebugger cid { cmodel | state = ClientUnvalid } !! []
+        _ -> model !! []
 
     SwitchDebugger -> Switching cid cmodel !! [performOnServer (StartDebugView cid)]
 
@@ -573,12 +575,14 @@ wrapUpdate update = \msg model -> case model of
   Switching cid cmodel -> case msg of
     AppMsg parent runCycle appMsg -> let (newcmodel, cmd) = handleAppMsg update runCycle appMsg parent cid cmodel in Switching cid newcmodel !! [cmd]
     ParentStillMember runCycle _ parentMsg appMsg result -> let (newcmodel, cmd) = handleParentStillMember update runCycle cid parentMsg appMsg result cmodel in Switching cid newcmodel !! [cmd]
-    OnSocketMsg data -> case (fromJSONString data) of
-      PauseClient -> let (newcmodel, cmd) = pauseClient cmodel in Switching cid newcmodel !! [cmd]
-      ResumeClientFromPaused resume -> let (newcmodel, cmd) = resumeClientFromPaused resume cmodel in Switching cid newcmodel !! [cmd]
-      ResumeClientFromPrevious resume -> let (newcmodel, cmd) = resumeClientFromPrevious cid resume cmodel in Switching cid newcmodel !! [cmd]
-      InvalidateClient -> Switching cid { cmodel | state = ClientUnvalid } !! []
-      _ -> model !! []
+    OnSocketMsg data -> case cmodel.state of
+      ClientUnvalid -> model !! []
+      _ -> case (fromJSONString data) of
+        PauseClient -> let (newcmodel, cmd) = pauseClient cmodel in Switching cid newcmodel !! [cmd]
+        ResumeClientFromPaused resume -> let (newcmodel, cmd) = resumeClientFromPaused resume cmodel in Switching cid newcmodel !! [cmd]
+        ResumeClientFromPrevious resume -> let (newcmodel, cmd) = resumeClientFromPrevious cid resume cmodel in Switching cid newcmodel !! [cmd]
+        InvalidateClient -> Switching cid { cmodel | state = ClientUnvalid } !! []
+        _ -> model !! []
 
     HandleStartDebugView result -> case result of
       Result.Err err -> model !! [] -- TODO handle error in view
@@ -593,22 +597,34 @@ wrapUpdate update = \msg model -> case model of
   ServerDebugger cid smodel cmodel -> case msg of
     AppMsg parent runCycle appMsg -> let (newcmodel, cmd) = handleAppMsg update runCycle appMsg parent cid cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
     ParentStillMember runCycle _ parentMsg appMsg result -> let (newcmodel, cmd) = handleParentStillMember update runCycle cid parentMsg appMsg result cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
-    OnSocketMsg data -> case (fromJSONString data) of
-      SetServerModel serverModel -> ServerDebugger cid serverModel cmodel !! []
-      PauseClient -> let (newcmodel, cmd) = pauseClient cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
-      ResumeClientFromPaused resume -> let (newcmodel, cmd) = resumeClientFromPaused resume cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
-      ResumeClientFromPrevious resume -> let (newcmodel, cmd) = resumeClientFromPrevious cid resume cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
-      InvalidateClient -> ServerDebugger cid smodel { cmodel | state = ClientUnvalid } !! []
-      _ -> model !! []
+    OnSocketMsg data -> case cmodel.state of
+      ClientUnvalid -> model !! []
+      _ -> case (fromJSONString data) of
+        SetServerModel serverModel -> ServerDebugger cid serverModel cmodel !! []
+        PauseClient -> let (newcmodel, cmd) = pauseClient cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
+        ResumeClientFromPaused resume -> let (newcmodel, cmd) = resumeClientFromPaused resume cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
+        ResumeClientFromPrevious resume -> let (newcmodel, cmd) = resumeClientFromPrevious cid resume cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
+        InvalidateClient -> ServerDebugger cid smodel { cmodel | state = ClientUnvalid } !! []
+        _ -> model !! []
 
-    Pause -> model !! [performOnServer PauseDebugger]
-    Resume -> model !! [performOnServer ResumeDebugger]
-    GoBack index -> model !! [performOnServer (GoBackDebugger index)]
+    Pause -> case cmodel.state of
+      ClientUnvalid -> model !! []
+      _ -> model !! [performOnServer PauseDebugger]
+    Resume -> case cmodel.state of
+      ClientUnvalid -> model !! []
+      _ -> model !! [performOnServer ResumeDebugger]
+    GoBack index -> case cmodel.state of
+      ClientUnvalid -> model !! []
+      _ -> model !! [performOnServer (GoBackDebugger index)]
 
-    SetResume index -> case Array.get index resumeStrategies of
-      Just resume -> model !! [performOnServer (SetDebuggerResumeStrategy resume)]
-      _ -> model !! []
-    ToggleShowParentage runInBackground -> model !! [performOnServer (ToggleShowParentageDebugger runInBackground)]
+    SetResume index -> case cmodel.state of
+      ClientUnvalid -> model !! []
+      _ -> case Array.get index resumeStrategies of
+        Just resume -> model !! [performOnServer (SetDebuggerResumeStrategy resume)]
+        _ -> model !! []
+    ToggleShowParentage runInBackground -> case cmodel.state of
+      ClientUnvalid -> model !! []
+      _ -> model !! [performOnServer (ToggleShowParentageDebugger runInBackground)]
 
     SwitchDebugger -> model !! [performOnServer (StopDebugView cid)]
     HandleStopDebugView result -> case result of
@@ -631,27 +647,30 @@ resumeClientFromPrevious cid maybeNewModel cmodel =
     _ -> { cmodel | state = ClientRunning } !! []
 
 handleParentStillMember : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> RunCycle -> ClientId -> ParentMsg -> msg -> Result Error Bool -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
-handleParentStillMember update runCycle cid parentMsg appMsg result cmodel = case result of
-  Result.Ok stillMember -> case stillMember of
-    True -> case cmodel.state of
+handleParentStillMember update runCycle cid parentMsg appMsg result cmodel = case cmodel.state of
+  ClientUnvalid -> cmodel !! []
+  _ -> case result of
+    Result.Ok stillMember -> case stillMember of
+      True -> case cmodel.state of
+        ClientRunning -> updateAppModel update appMsg parentMsg cid cmodel
+        ClientPaused -> case parentMsg of
+          NoParentMsg -> cmodel !! []
+          _ -> cmodel !! [performOnServer (AddPausedClientEvent cmodel.runCycle (cid,parentMsg,appMsg))]
+        _ -> cmodel !! []
+      False -> cmodel !! [] -- discard message
+    Result.Err err -> cmodel !! [] -- TODO error in view
+
+handleAppMsg : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> RunCycle -> msg -> ParentMsg -> ClientId -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
+handleAppMsg update runCycle appMsg parentMsg cid cmodel = case cmodel.state of
+  ClientUnvalid -> cmodel !! []
+  _ -> if runCycle < cmodel.runCycle then
+      cmodel !! [performOnServer (IsParentStillMember runCycle cid parentMsg appMsg)]
+    else case cmodel.state of
       ClientRunning -> updateAppModel update appMsg parentMsg cid cmodel
       ClientPaused -> case parentMsg of
         NoParentMsg -> cmodel !! []
         _ -> cmodel !! [performOnServer (AddPausedClientEvent cmodel.runCycle (cid,parentMsg,appMsg))]
       _ -> cmodel !! []
-    False -> cmodel !! [] -- discard message
-  Result.Err err -> cmodel !! [] -- TODO error in view
-
-handleAppMsg : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> RunCycle -> msg -> ParentMsg -> ClientId -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
-handleAppMsg update runCycle appMsg parentMsg cid cmodel =
-  if runCycle < cmodel.runCycle then
-    cmodel !! [performOnServer (IsParentStillMember runCycle cid parentMsg appMsg)]
-  else case cmodel.state of
-    ClientRunning -> updateAppModel update appMsg parentMsg cid cmodel
-    ClientPaused -> case parentMsg of
-      NoParentMsg -> cmodel !! []
-      _ -> cmodel !! [performOnServer (AddPausedClientEvent cmodel.runCycle (cid,parentMsg,appMsg))]
-    _ -> cmodel !! []
 
 updateAppModel : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> msg -> ParentMsg -> ClientId -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
 updateAppModel update appMsg parentMsg cid cmodel =
