@@ -140,7 +140,7 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
           case serverModel.debugger.state of
             Running -> updateServerAppModel parent serverAppMsg serverModel
             Paused -> storePausedMessage updateServer runCycle parent serverAppMsg serverModel
-        else let test = Debug.log "Message discarded because of previous runCycle and removed parent:" (toString serverAppMsg) in serverModel ! [] -- Message discarded...
+        else serverModel ! [] -- Message discarded...
       else case serverModel.debugger.state of
         Running -> updateServerAppModel parent serverAppMsg serverModel
         Paused -> storePausedMessage updateServer runCycle parent serverAppMsg serverModel
@@ -309,7 +309,7 @@ wrapServerRPCs serverRPCs = \remoteServerMsg -> case remoteServerMsg of
             case debugger.state of
               Running -> updateServerAppModelFromRPC updateAppModel cid parentid rpcid msg serverModel
               Paused -> storePausedRPCMessage updateAppModel runCycle cid parentid rpcid msg serverModel
-          else let test = Debug.log "RPC Message discarded because of previous runCycle and removed parent:" (toString msg) in serverModel ! [] -- Message discarded...
+          else serverModel ! [] -- Message discarded...
         else case debugger.state of
           Running -> updateServerAppModelFromRPC updateAppModel cid parentid rpcid msg serverModel
           Paused -> storePausedRPCMessage updateAppModel runCycle cid parentid rpcid msg serverModel)
@@ -388,17 +388,17 @@ checkEvents previous eventsToCheck goBackIndex (serverModel, clients) = case eve
                   case TimeLine.getServerEventParentIndex eventType debugger.timeline of
                     Just index -> case goBackIndex == index of
                       False -> let (newServerModel,_) = updateServerAppModel parent serverMsg serverModel in (newServerModel,clients)
-                      True -> let test = Debug.log "Message discarded because parent is the go back point:" (toString serverMsg) in (serverModel,clients) -- Message discarded...
+                      True -> (serverModel,clients) -- Message discarded...
                     _ -> (serverModel,clients) -- Not possible
-                else let test = Debug.log "ServerMessage discarded because parent does not exist in new timeline:" (toString serverMsg) in (serverModel,clients)  -- Message discarded...
+                else (serverModel,clients)  -- Message discarded...
               handleServerRPCevent cid parentid rpcid updateAppModel msg =
                 if TimeLine.isClientParentMember runCycle cid (RegularMsg parentid) debugger.timeline || TimeLine.isClientParentMember debugger.runCycle cid (RegularMsg parentid) debugger.timeline then
                   case TimeLine.getServerEventParentIndex eventType debugger.timeline of
                     Just index -> case goBackIndex == index of
                       False -> let (newServerModel,_) = updateServerAppModelFromRPC updateAppModel cid parentid rpcid msg serverModel in (newServerModel,clients)
-                      True -> let test = Debug.log "RPCMessage discarded because parent is the go back point:" (toString msg) in (serverModel,clients) -- Message discarded...
+                      True -> (serverModel,clients) -- Message discarded...
                     _ -> (serverModel,clients) -- Not possible
-                else let test = Debug.log "RPCMessage discarded because parent does not exist in new timeline:" (toString msg) in (serverModel,clients)  -- Message discarded...
+                else (serverModel,clients)  -- Message discarded...
 
           in case eventType of
             ServerMsgEvent msgType serverMsg -> case msgType of
@@ -425,9 +425,9 @@ checkEvents previous eventsToCheck goBackIndex (serverModel, clients) = case eve
                                   (serverModel,Dict.insert (toString cid) (newClientModel,rpcWrappedCmd) clients)
                           _ -> (serverModel, clients)
 
-                  True -> let test = Debug.log "ClientMessage discarded because parent is the go back point:" (toString msg) in (serverModel,clients) -- Message discarded...
+                  True -> (serverModel,clients) -- Message discarded...
                 _ -> (serverModel,clients) -- Not possible
-            else let test = Debug.log "ClientMessage discarded because parent does not exist in new timeline:" (toString msg) in (serverModel,clients)  -- Message discarded...
+            else (serverModel,clients)  -- Message discarded...
            in case eventType of
             Init ids -> (serverModel,clients) -- TODO
             MsgEvent msgType ids msg -> case msgType of
@@ -450,15 +450,13 @@ checkPaused previous messages ((serverModel,cmd),clients) = let debugger = serve
         if TimeLine.isServerParentMember runCycle parentMsg debugger.timeline then
           let (newServerModel,newServerCmd) = updateServerAppModel parentMsg serverAppMsg serverModel in
             checkPaused previous otherMessages ((newServerModel ! [cmd,newServerCmd]), clients)
-        else let test = Debug.log "ServerMessage discarded because parent does not exist in new timeline:" (toString serverAppMsg) in
-          checkPaused previous otherMessages ((serverModel,cmd),clients) -- Message discarded...
+        else checkPaused previous otherMessages ((serverModel,cmd),clients) -- Message discarded...
 
       PausedRemoteServerAppMsg cid updateAppModel parentid rpcid remoteServerMsg ->
         if TimeLine.isClientParentMember runCycle cid (RegularMsg parentid) debugger.timeline then
           let (newServerModel,newServerCmd) = updateServerAppModelFromRPC updateAppModel cid parentid rpcid remoteServerMsg serverModel in
             checkPaused previous otherMessages ((newServerModel ! [cmd,newServerCmd]), clients)
-        else let test = Debug.log "Server-RPC-Message discarded because parent does not exist in new timeline:" (toString remoteServerMsg) in
-          checkPaused previous otherMessages ((serverModel,cmd),clients) -- Message discarded...
+        else checkPaused previous otherMessages ((serverModel,cmd),clients) -- Message discarded...
       PausedClientAppMsg (cid,parentMsg,msg) ->
         if TimeLine.isClientParentMember runCycle cid parentMsg debugger.timeline then
            case Dict.get (toString cid) clients of
@@ -471,8 +469,7 @@ checkPaused previous messages ((serverModel,cmd),clients) = let debugger = serve
                       let (newClientModel,newClientCmd) = updateAppModel serverModel.updateClient msg parentMsg cid clientModel in
                         ((serverModel,cmd),Dict.insert (toString cid) (newClientModel !! [newClientCmd]) clients)
                   _ -> ((serverModel,cmd), clients)
-        else let test = Debug.log "ClientMessage discarded because parent does not exist in new timeline:" (toString msg) in
-          checkPaused previous otherMessages ((serverModel,cmd),clients) -- Message discarded...
+        else checkPaused previous otherMessages ((serverModel,cmd),clients) -- Message discarded...
 
 -- SERVER-STATE
 
