@@ -173,9 +173,6 @@ getClientEventParentIndexHelp cid eventType (TimeLine {clientParentIndices}) = c
     ClientChildMsg parentid _ -> case Dict.get (toString cid) clientParentIndices of
       Just parentIndices -> Dict.get parentid parentIndices
       _ -> Nothing
-    ClientRPCchildMsg parentid _ -> case Dict.get (toString cid) clientParentIndices of
-      Just parentIndices -> Dict.get parentid parentIndices
-      _ -> Nothing
     _ -> Nothing
   _ -> Nothing
 
