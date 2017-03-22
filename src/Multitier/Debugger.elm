@@ -425,8 +425,8 @@ checkEvents previous eventsToCheck goBackIndex (serverModel, clients) = case eve
                           Just (cid, (previousAppModel, previousAppCmd, previousParentMsg, previousRpcMsgCount, previousMsgCount)) ->
                             let clientModel = ClientDebuggerModel ClientPaused previousAppModel debugger.runCycle previousRpcMsgCount previousMsgCount in
                               let (rpcWrappedModel, rpcWrappedCmd, _) = wrapRPCcmds cid previousParentMsg clientModel previousAppCmd in
-                                let (newClientModel,_) = updateAppModelWithoutEffects serverModel.updateClient msg parent cid rpcWrappedModel in
-                                  (serverModel,Dict.insert (toString cid) (newClientModel,rpcWrappedCmd) clients)
+                                let (newClientModel,newClientCmd) = updateAppModelWithoutEffects serverModel.updateClient msg parent cid rpcWrappedModel in
+                                  (serverModel,Dict.insert (toString cid) (newClientModel !! [rpcWrappedCmd,newClientCmd]) clients)
                           _ -> (serverModel, clients)
 
                   True -> (serverModel,clients) -- Message discarded...
@@ -636,8 +636,8 @@ resumeClientFromPrevious : ClientId  -> Maybe (ClientDebuggerModel model, Multit
 resumeClientFromPrevious cid maybeNewModel cmodel = case cmodel.state of
   ClientUnvalid -> cmodel !! []
   _ -> case maybeNewModel of
-    Just (newModel,newCmd) -> { newModel | state = ClientRunning } !! [newCmd]
-    _ -> { cmodel | state = ClientRunning } !! []
+    Just (newModel,newCmd) -> { newModel | state = ClientRunning, runCycle = newModel.runCycle + 1 } !! [newCmd]
+    _ -> { cmodel | state = ClientRunning, runCycle = cmodel.runCycle + 1 } !! []
 
 handleParentStillMember : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> RunCycle -> ClientId -> ParentMsg -> msg -> Result Error Bool -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
 handleParentStillMember update runCycle cid parentMsg appMsg result cmodel = case cmodel.state of
