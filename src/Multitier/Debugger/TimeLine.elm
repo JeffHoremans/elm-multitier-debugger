@@ -168,11 +168,12 @@ getClientEventParentIndex : ClientId -> ClientEventType msg -> TimeLine serverMo
 getClientEventParentIndex cid eventType timeline = Maybe.map (\(_,index) -> index) (getClientEventParentIndexHelp cid eventType timeline)
 
 getClientEventParentIndexHelp : ClientId -> ClientEventType msg -> TimeLine serverModel serverMsg remoteServerMsg model msg -> Maybe (RunCycle, Int)
-getClientEventParentIndexHelp cid eventType (TimeLine {clientParentIndices}) = case eventType of
+getClientEventParentIndexHelp cid eventType (TimeLine {clientParentIndices,serverParentIndices}) = case eventType of
   MsgEvent msgType _ _ -> case msgType of
     ClientChildMsg parentid _ -> case Dict.get (toString cid) clientParentIndices of
       Just parentIndices -> Dict.get parentid parentIndices
       _ -> Nothing
+    ClientRPCchildMsg rpcid msgid -> Dict.get ((toString cid),rpcid) serverParentIndices.rpc
     _ -> Nothing
   _ -> Nothing
 
