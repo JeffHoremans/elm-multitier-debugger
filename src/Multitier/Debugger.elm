@@ -419,8 +419,8 @@ checkEvents previous eventsToCheck goBackIndex (serverModel, clients) = case eve
                 Just index -> case goBackIndex == index of
                   False -> case Dict.get (toString cid) clients of
                     Just (clientModel, clientCmd) ->
-                      let (newClientModel,_) = updateAppModelWithoutEffects serverModel.updateClient msg parent cid clientModel in
-                        (serverModel, Dict.insert (toString cid) (newClientModel,clientCmd) clients)
+                      let (newClientModel,newClientCmd) = updateAppModelWithoutEffects serverModel.updateClient msg parent cid clientModel in
+                        (serverModel, Dict.insert (toString cid) (newClientModel !! [clientCmd,newClientCmd]) clients)
                     _ -> case Dict.get (toString cid) previous.clients of
                           Just (cid, (previousAppModel, previousAppCmd, previousParentMsg, previousRpcMsgCount, previousMsgCount)) ->
                             let clientModel = ClientDebuggerModel ClientPaused previousAppModel debugger.runCycle previousRpcMsgCount previousMsgCount in
