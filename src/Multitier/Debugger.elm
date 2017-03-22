@@ -205,14 +205,17 @@ broadcastResumeFromPausedAction clients serverModel =
     |> List.map (\cid -> sendSocketMsg cid (ResumeClientFromPaused (Dict.get (toString cid) clients)))
     |> Cmd.batch
 
-broadcastResumeFromPreviousAction : PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg) -> Dict String (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg)) -> ServerModel serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
-broadcastResumeFromPreviousAction previous clients serverModel =
-  TimeLine.clients serverModel.debugger.timeline
-    |> List.map (\cid -> case Dict.get (toString cid) previous.clients of
-        Just prev -> sendSocketMsg cid (ResumeClientFromPrevious (Dict.get (toString cid) clients))
-        _ -> sendSocketMsg cid InvalidateClient)
-    |> Cmd.batch
--- TODO repop clients + delete when disconnecting...
+broadcastResumeFromPreviousAction : PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg) -> List ClientId -> Dict String (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg)) -> ServerModel serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
+broadcastResumeFromPreviousAction previous oldClients clients serverModel =
+  let allClients = TimeLine.clients serverModel.debugger.timeline
+      allClientsDict = allClients |> List.map (\cid -> ((toString cid),cid)) |> Dict.fromList in
+    allClients
+      |> List.map (\cid -> sendSocketMsg cid (ResumeClientFromPrevious (Dict.get (toString cid) clients)))
+      |> List.append (List.map (\cid -> case Dict.member (toString cid) allClientsDict of
+        False -> sendSocketMsg cid InvalidateClient
+        _ -> Cmd.none) oldClients)
+      |> Cmd.batch
+-- TODO repop clients + delete when disconnecting... ++ handle init of new client when paused
 
 broadcastSocketMsg : SocketMsg serverModel serverMsg remoteServerMsg model msg -> Cmd (ServerMsg serverMsg)
 broadcastSocketMsg msg = ServerWebSocket.broadcast socketPath (Encode.encode 0 (toJSON msg))
@@ -362,14 +365,15 @@ resumeServerFromPrevious :
   (ServerModel serverModel serverMsg remoteServerMsg model msg, Cmd (ServerMsg serverMsg))
 resumeServerFromPrevious previous serverModel = let debugger = serverModel.debugger in
   let (newTimeline, eventsToCheck) = TimeLine.goBack previous.index debugger.timeline
-      messagesReceivedDuringPaused = debugger.messagesReceivedDuringPaused |> Array.toList in
+      messagesReceivedDuringPaused = debugger.messagesReceivedDuringPaused |> Array.toList
+      currentClients = TimeLine.clients debugger.timeline in
     let ((newServerModel,newServerCmd),newClients) =
       checkEvents previous eventsToCheck previous.index ({ serverModel | debugger = { debugger | timeline = newTimeline, appModel = previous.appModel, runCycle = debugger.runCycle + 1, msgCount = previous.msgCount, rpcMsgCount = previous.rpcMsgCount }}, Dict.empty)
         |> (\(model,clients) -> ((model,Cmd.none),clients))
         |> checkPaused previous (Array.toList serverModel.debugger.messagesReceivedDuringPaused)
      in let newDebugger = newServerModel.debugger in
       { newServerModel | debugger = { newDebugger | state = Running, previous = Maybe.Nothing }}
-        ! [Cmd.map (ServerAppMsg previous.parentMsg newDebugger.runCycle) previous.cmd, newServerCmd, broadcastResumeFromPreviousAction previous newClients newServerModel]
+        ! [Cmd.map (ServerAppMsg previous.parentMsg newDebugger.runCycle) previous.cmd, newServerCmd, broadcastResumeFromPreviousAction previous currentClients newClients newServerModel]
 
 checkEvents :
   PreviousState serverModel (Cmd serverMsg) model (MultitierCmd remoteServerMsg msg) ->
