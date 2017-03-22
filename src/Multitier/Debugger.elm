@@ -818,16 +818,20 @@ timelineView smodel =
             let clientIndex = Maybe.withDefault 0 (Dict.get (toString cid) clientIndices) in
               let circle =
                 let parentLine = if smodel.showParentage then
-                  case TimeLine.getClientEventParentIndex cid clientEvent smodel.timeline of
-                    Just parentIndex ->
-                      let px1 = (parentIndex * eventSpacing) + offset
-                          py1 = (clientIndex * 40) + 60
-                          px2 = (index * eventSpacing) + offset
-                          py2 = (clientIndex * 40) + 60
-                          qx = px1 + ((px2 - px1) // 2)
-                          qy = ((clientIndex * 40) + 60) - 20 in
-                        [Svg.path [d ("M "++(toString px1)++" "++(toString py1)++" Q "++(toString qx)++ " "++(toString qy)++" "++(toString px2)++" "++(toString py2)), stroke "black", fill "transparent"] []]
-                    _ -> []
+                  case clientEvent of
+                    Init _ -> []
+                    MsgEvent msgType _ _ -> case msgType of
+                      ClientRPCchildMsg _ _ -> []
+                      _ -> case TimeLine.getClientEventParentIndex cid clientEvent smodel.timeline of
+                        Just parentIndex ->
+                          let px1 = (parentIndex * eventSpacing) + offset
+                              py1 = (clientIndex * 40) + 60
+                              px2 = (index * eventSpacing) + offset
+                              py2 = (clientIndex * 40) + 60
+                              qx = px1 + ((px2 - px1) // 2)
+                              qy = ((clientIndex * 40) + 60) - 20 in
+                            [Svg.path [d ("M "++(toString px1)++" "++(toString py1)++" Q "++(toString qx)++ " "++(toString qy)++" "++(toString px2)++" "++(toString py2)), stroke "black", fill "transparent"] []]
+                        _ -> []
                   else []
                  in List.append parentLine [Svg.circle [r "5", fill (if previousIndex == index then "gray" else "black"), cx (toString ((index * eventSpacing) + offset )), cy (toString ((clientIndex * 40) + 60)), onClick (GoBack index), style [("cursor", "pointer")]] []] in
                 let (maybeRPCid, rpcIds) = case clientEvent of
