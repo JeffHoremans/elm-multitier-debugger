@@ -233,7 +233,7 @@ isServerParentMember parent (TimeLine {serverParentIndices}) =
       Just (runCycle,_) -> parentRunCycle == runCycle
       _ -> False in
   case parent of
-    None -> True
+    None -> False
     RegularServerMsg parentRunCycle msgid -> checkRunCycle parentRunCycle (Dict.get msgid serverParentIndices.regular)
     ServerRPC parentRunCycle cid rpcid -> checkRunCycle parentRunCycle (Dict.get ((toString cid),rpcid) serverParentIndices.rpc)
     ServerRPCmsg parentRunCycle (cid,rpcid,rpcmsgid) -> checkRunCycle parentRunCycle (Dict.get ((toString cid),rpcid,rpcmsgid) serverParentIndices.rpcchild)
@@ -246,7 +246,7 @@ isClientParentMember cid parent (TimeLine {clientParentIndices, serverParentIndi
       Just (runCycle,_) -> parentRunCycle == runCycle
       _ -> False in
   case parent of
-    NoParentMsg -> True
+    NoParentMsg -> False
     RegularMsg parentRunCycle msgid -> case Dict.get (toString cid) clientParentIndices of
       Just parentIndices -> checkRunCycle parentRunCycle (Dict.get msgid parentIndices)
       _ -> False

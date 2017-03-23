@@ -142,7 +142,7 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
             updateServerAppModel parent serverAppMsg serverModel
           else serverModel ! [] -- Message discarded...
         Paused -> if TimeLine.isServerParentMember parent debugger.timeline then
-          updateServerAppModel parent serverAppMsg serverModel
+          storePausedMessage updateServer parent serverAppMsg serverModel
         else serverModel ! [] -- Message discarded...
     OnClientConnect cid ->
       { serverModel | debugger =  { debugger | clientIds = (toString cid) :: debugger.clientIds }} ! [initializeClient serverModel cid]
