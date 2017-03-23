@@ -153,19 +153,23 @@ updateRunCycle newRunCycle index (TimeLine {events, server, clients, rpcindices,
   case Array.get index events of
     Just (_,event,_) ->
       let value = (newRunCycle,index) in
-        let (newServerParentIndices,newClientParentIndices) =
+        let (newServer,newClients,newServerParentIndices,newClientParentIndices) =
           case event of
-            ServerEvent eventType ->
-              let updatedServerParentIndices =
-                case eventType of
-                  InitServerEvent -> { serverParentIndices | regular = Dict.insert 0 value serverParentIndices.regular}
-                  ServerRPCevent _ cid parentid rpcid _ _ -> { serverParentIndices | rpc = Dict.insert ((toString cid),rpcid) value serverParentIndices.rpc}
-                  ServerMsgEvent serverMsgType _ -> case serverMsgType of
-                    NewServerMsg msgid -> { serverParentIndices | regular = Dict.insert msgid value serverParentIndices.regular}
-                    ServerChildMsg _ _ msgid -> { serverParentIndices | regular = Dict.insert msgid value serverParentIndices.regular}
-                    RPCserverMsg _ cid rpcid rpcmsgid -> { serverParentIndices | rpcchild = Dict.insert ((toString cid),rpcid,rpcmsgid) value serverParentIndices.rpcchild}
-                    RPCchildServerMsg _ _ msgid -> { serverParentIndices | regular = Dict.insert msgid value serverParentIndices.regular}
-              in (updatedServerParentIndices, clientParentIndices)
+            ServerEvent eventType -> let (serverModel, serverCmd, parentMsg, rpcMsgCount, msgCount) = server in
+              let updatedServerParentIndices = case eventType of
+                InitServerEvent -> { serverParentIndices | regular = Dict.insert 0 value serverParentIndices.regular}
+                ServerRPCevent _ cid parentid rpcid _ _ -> { serverParentIndices | rpc = Dict.insert ((toString cid),rpcid) value serverParentIndices.rpc}
+                ServerMsgEvent serverMsgType _ -> case serverMsgType of
+                  NewServerMsg msgid -> { serverParentIndices | regular = Dict.insert msgid value serverParentIndices.regular}
+                  ServerChildMsg _ _ msgid -> { serverParentIndices | regular = Dict.insert msgid value serverParentIndices.regular}
+                  RPCserverMsg _ cid rpcid rpcmsgid -> { serverParentIndices | rpcchild = Dict.insert ((toString cid),rpcid,rpcmsgid) value serverParentIndices.rpcchild}
+                  RPCchildServerMsg _ _ msgid -> { serverParentIndices | regular = Dict.insert msgid value serverParentIndices.regular}
+              in let updatedParentMsg = case parentMsg of
+                  None -> parentMsg
+                  RegularServerMsg _ msgid -> RegularServerMsg newRunCycle msgid
+                  ServerRPC _ cid rpcid -> ServerRPC newRunCycle cid rpcid
+                  ServerRPCmsg _ parentid -> ServerRPCmsg newRunCycle parentid
+              in ((serverModel,serverCmd,updatedParentMsg,rpcMsgCount,msgCount),clients,updatedServerParentIndices, clientParentIndices)
             ClientEvent cid eventType -> let parentIndices = Maybe.withDefault Dict.empty (Dict.get (toString cid) clientParentIndices) in
               let updatedClientParentIndices =
                 case eventType of
@@ -174,7 +178,19 @@ updateRunCycle newRunCycle index (TimeLine {events, server, clients, rpcindices,
                     NewClientMsg msgid -> Dict.insert (toString cid) (Dict.insert msgid value parentIndices) clientParentIndices
                     ClientChildMsg _ _ msgid -> Dict.insert (toString cid) (Dict.insert msgid value parentIndices) clientParentIndices
                     ClientRPCchildMsg _ _ msgid -> Dict.insert (toString cid) (Dict.insert msgid value parentIndices) clientParentIndices
-              in (serverParentIndices,updatedClientParentIndices) in
+
+              in let updatedClients = clients
+                |> Dict.update (toString cid) (\maybeClient -> case maybeClient of
+                  Just (cid, (model, cmd, parentMsg, rpcCount, msgCount)) ->
+                    let updateParentMsg =
+                      case parentMsg of
+                        NoParentMsg -> parentMsg
+                        RegularMsg _ msgid -> RegularMsg newRunCycle msgid
+                        ServerRPCparentMsg _ msgid -> ServerRPCparentMsg newRunCycle msgid
+                    in (Just (cid, (model, cmd, updateParentMsg, rpcCount, msgCount)))
+                  _ -> Nothing )
+
+              in (server,clients,serverParentIndices,updatedClientParentIndices) in
           let newEvents = Array.set index (newRunCycle,event,EventRecoveryState server clients rpcindices newClientParentIndices newServerParentIndices) events in
             TimeLine (Model newEvents server clients rpcindices newClientParentIndices newServerParentIndices)
     _ -> TimeLine (Model events server clients rpcindices clientParentIndices serverParentIndices)

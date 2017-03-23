@@ -378,7 +378,7 @@ checkEvents previous eventsToCheck goBackIndex (serverModel, clients) = case eve
       case event of
         ServerEvent eventType ->
           let handleServerEvent parent serverMsg =
-                if TimeLine.isServerParentMember parent debugger.timeline then -- TODO what if both in events?
+                if TimeLine.isServerParentMember parent debugger.timeline then
                   case TimeLine.getServerEventParentIndex eventType debugger.timeline of
                     Just index -> case goBackIndex == index of
                       False -> let (newServerModel,_) = updateServerAppModel parent serverMsg serverModel in (newServerModel,clients)
@@ -636,9 +636,7 @@ handleParentStillMember update cid parentMsg appMsg result cmodel = case cmodel.
     Result.Ok stillMember -> case stillMember of
       True -> case cmodel.state of
         ClientRunning -> updateAppModel update appMsg parentMsg cid cmodel
-        ClientPaused -> case parentMsg of
-          NoParentMsg -> cmodel !! []
-          _ -> cmodel !! [performOnServer (AddPausedClientEvent cmodel.runCycle (cid,parentMsg,appMsg))]
+        ClientPaused -> cmodel !! [performOnServer (AddPausedClientEvent cmodel.runCycle (cid,parentMsg,appMsg))]
         _ -> cmodel !! []
       False -> cmodel !! [] -- discard message
     Result.Err err -> cmodel !! [] -- TODO error in view
