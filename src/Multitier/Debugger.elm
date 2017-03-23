@@ -580,7 +580,7 @@ wrapUpdate update = \msg model -> case model of
       ResumeClientFromPaused resume -> let (newcmodel, cmd) = resumeClientFromPaused resume cmodel in Switching cid newcmodel !! [cmd]
       ResumeClientFromPrevious resume -> let (newcmodel, cmd) = resumeClientFromPrevious cid resume cmodel in Switching cid newcmodel !! [cmd]
       InvalidateClient -> Switching cid { cmodel | state = ClientUnvalid } !! []
-      GoBackClient maybeModel -> let (newcmodel,cmd) = goBackClient maybeModel cmodel in ClientDebugger cid newcmodel !! [cmd]
+      GoBackClient maybeModel -> let (newcmodel,cmd) = goBackClient maybeModel cmodel in Switching cid newcmodel !! [cmd]
       _ -> model !! []
 
     HandleStartDebugView result -> case result of
@@ -602,7 +602,7 @@ wrapUpdate update = \msg model -> case model of
       ResumeClientFromPaused resume -> let (newcmodel, cmd) = resumeClientFromPaused resume cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
       ResumeClientFromPrevious resume -> let (newcmodel, cmd) = resumeClientFromPrevious cid resume cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
       InvalidateClient -> ServerDebugger cid smodel { cmodel | state = ClientUnvalid } !! []
-      GoBackClient maybeModel -> let (newcmodel,cmd) = goBackClient maybeModel cmodel in ClientDebugger cid newcmodel !! [cmd]
+      GoBackClient maybeModel -> let (newcmodel,cmd) = goBackClient maybeModel cmodel in ServerDebugger cid smodel newcmodel !! [cmd]
       _ -> model !! []
 
     Pause -> model !! [performOnServer PauseDebugger]
