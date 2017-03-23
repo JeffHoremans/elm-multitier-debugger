@@ -362,7 +362,13 @@ resumeServerFromPrevious previous serverModel = let debugger = serverModel.debug
       messagesReceivedDuringPaused = debugger.messagesReceivedDuringPaused |> Array.toList
       currentClients = TimeLine.clients debugger.timeline in
     let ((newServerModel,newServerCmd),newClients) =
-      checkEvents previous eventsToCheck previous.index ({ serverModel | debugger = { debugger | timeline = newTimeline, appModel = previous.appModel, runCycle = debugger.runCycle + 1, msgCount = previous.msgCount, rpcMsgCount = previous.rpcMsgCount }}, Dict.empty)
+      let modelToUse = { serverModel | debugger = { debugger | timeline = newTimeline, appModel = previous.appModel, runCycle = debugger.runCycle + 1, msgCount = previous.msgCount, rpcMsgCount = previous.rpcMsgCount }} in
+      let clientsToUse = previous.clients
+            |> Dict.map (\_ (cid, (previousAppModel, previousAppCmd, previousParentMsg, previousRpcMsgCount, previousMsgCount)) ->
+               let clientModel = ClientDebuggerModel ClientPaused previousAppModel (debugger.runCycle + 1) previousRpcMsgCount previousMsgCount in
+                 let (rpcWrappedModel, rpcWrappedCmd, _) = wrapRPCcmds cid previousParentMsg previousMsgCount clientModel previousAppCmd in
+                   (rpcWrappedModel !! [rpcWrappedCmd]))
+      in checkEvents previous eventsToCheck previous.index (modelToUse, clientsToUse)
         |> (\(model,clients) -> ((model,Cmd.none),clients))
         |> checkPaused previous (Array.toList serverModel.debugger.messagesReceivedDuringPaused)
      in let newDebugger = newServerModel.debugger in
@@ -405,13 +411,7 @@ checkEvents previous eventsToCheck goBackIndex (serverModel, clients) = case eve
                 Just (clientModel, clientCmd) ->
                   let (newClientModel,newClientCmd) = updateAppModelWithoutEffects serverModel.updateClient msg parent cid clientModel in
                     (serverModel, Dict.insert (toString cid) (newClientModel !! [clientCmd,newClientCmd]) clients)
-                _ -> case Dict.get (toString cid) previous.clients of
-                      Just (cid, (previousAppModel, previousAppCmd, previousParentMsg, previousRpcMsgCount, previousMsgCount)) ->
-                        let clientModel = ClientDebuggerModel ClientPaused previousAppModel debugger.runCycle previousRpcMsgCount previousMsgCount in
-                          let (rpcWrappedModel, rpcWrappedCmd, _) = wrapRPCcmds cid previousParentMsg previousMsgCount clientModel previousAppCmd in
-                            let (newClientModel,newClientCmd) = updateAppModelWithoutEffects serverModel.updateClient msg parent cid rpcWrappedModel in
-                              (serverModel,Dict.insert (toString cid) (newClientModel !! [rpcWrappedCmd,newClientCmd]) clients)
-                      _ -> (serverModel, clients)
+                _ -> (serverModel, clients) -- TODO handle new clients
             else (serverModel,clients)  -- Message discarded...
            in case eventType of
             Init ids -> (serverModel,clients) -- TODO
