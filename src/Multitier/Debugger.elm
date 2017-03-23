@@ -776,11 +776,11 @@ wrapView appView = \model -> case model of
             Just previous -> previous.appModel
             _ -> smodel.appModel))],
         eventsView smodel,
-        Html.pre [] [Html.text (toString (Array.map (\message -> case message of
-          PausedServerAppMsg parent serverMsg -> ("PausedServerAppMsg parent:(" ++ (toString parent) ++")-" ++ (toString serverMsg))
-          PausedRemoteServerAppMsg parentRunCycle cid _ parentid rpcid remoteServerMsg -> ("PausedRemoteServerAppMsg cid:(" ++ (toString cid) ++ "," ++ (toString rpcid) ++")-" ++ (toString remoteServerMsg))
-          PausedClientAppMsg (cid,parentMsg,msg) -> ("PausedClientAppMsg cid:(" ++ (toString cid) ++ ",parent:"  ++ (toString parentMsg) ++ ")-" ++ (toString msg))
-           ) smodel.messagesReceivedDuringPaused))],
+        -- Html.pre [] [Html.text (toString (Array.map (\message -> case message of
+        --   PausedServerAppMsg parent serverMsg -> ("PausedServerAppMsg parent:(" ++ (toString parent) ++")-" ++ (toString serverMsg))
+        --   PausedRemoteServerAppMsg parentRunCycle cid _ parentid rpcid remoteServerMsg -> ("PausedRemoteServerAppMsg cid:(" ++ (toString cid) ++ "," ++ (toString rpcid) ++")-" ++ (toString remoteServerMsg))
+        --   PausedClientAppMsg (cid,parentMsg,msg) -> ("PausedClientAppMsg cid:(" ++ (toString cid) ++ ",parent:"  ++ (toString parentMsg) ++ ")-" ++ (toString msg))
+        --    ) smodel.messagesReceivedDuringPaused))],
         timelineView smodel]
       in case smodel.state of
         Running ->
