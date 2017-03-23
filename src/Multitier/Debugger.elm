@@ -896,25 +896,38 @@ eventView runCycle event = case event of
   ClientCloseEvent cid -> "[Close-"++ (toString cid) ++"]"
   ServerEvent sevent -> serverEventView runCycle sevent
 
+-- clientEventView : RunCycle -> ClientId -> ClientEventType msg -> String
+-- clientEventView runCycle cid event = "(" ++ (toString runCycle) ++ ")" ++
+--   case event of
+--     Init rpcids -> "[Init-"++ (toString cid) ++ "-" ++ (toString rpcids) ++"]"
+--     MsgEvent msgType rpcids msg -> case msgType of
+--       NewClientMsg msgid -> "[NewMsg-"++ (toString cid) ++ "-" ++ (toString msgid) ++ "-" ++ (toString rpcids) ++"] " ++ (toString msg)
+--       ClientChildMsg parentRunCycle parentid msgid -> "(p" ++ (toString parentRunCycle) ++")[ChildMsg-"++ (toString cid) ++ "-(" ++ (toString parentid) ++ "," ++ (toString msgid) ++ ")-" ++ (toString rpcids) ++"] " ++ (toString msg)
+--       ClientRPCchildMsg parentRunCycle parentid rpcid msgid -> "(p" ++ (toString parentRunCycle) ++")[RPCchildMsg-"++ (toString cid) ++ "-(" ++ (toString rpcid) ++ "," ++ (toString msgid) ++ ")-" ++ (toString rpcids) ++"] " ++ (toString msg)
+--
+-- serverEventView : RunCycle -> ServerEventType serverModel serverMsg remoteServerMsg -> String
+-- serverEventView runCycle event = "(" ++ (toString runCycle) ++ ")" ++
+--   case event of
+--     InitServerEvent -> "[Init-Server]"
+--     ServerMsgEvent msgtype msg -> case msgtype of
+--       NewServerMsg msgid -> "[NewServerMsg](" ++ (toString msgid) ++ ")" ++ (toString msg)
+--       ServerChildMsg parentRunCycle parentid msgid -> "(p" ++ (toString parentRunCycle) ++")[ChildServerMsg](" ++ (toString parentid) ++ "," ++ (toString msgid) ++ ")" ++ (toString msg)
+--       RPCserverMsg parentRunCycle cid rpcid rpcmsgid -> "(p" ++ (toString parentRunCycle) ++")[RPCserverMsg](" ++ (toString cid) ++ "," ++ (toString rpcid) ++ "," ++ (toString rpcmsgid) ++")" ++ (toString msg)
+--       RPCchildServerMsg parentRunCycle (cid,rpcid, rpcmsgid) msgid -> "(p" ++ (toString parentRunCycle) ++")[RPCchildServerMsg]((" ++ (toString cid) ++ "," ++ (toString rpcid) ++ "," ++ (toString rpcmsgid) ++")," ++ (toString msgid) ++")" ++ (toString msg)
+--     ServerRPCevent parentRunCycle cid parentid rpcid _ msg -> "(p" ++ (toString parentRunCycle) ++")[RP-" ++ (toString cid) ++"-" ++ "," ++ "client-parent-id:" ++ (toString parentid) ++ "," ++(toString rpcid) ++"] " ++ (toString msg)
+
 clientEventView : RunCycle -> ClientId -> ClientEventType msg -> String
 clientEventView runCycle cid event = "(" ++ (toString runCycle) ++ ")" ++
   case event of
-    Init rpcids -> "[Init-"++ (toString cid) ++ "-" ++ (toString rpcids) ++"]"
-    MsgEvent msgType rpcids msg -> case msgType of
-      NewClientMsg msgid -> "[NewMsg-"++ (toString cid) ++ "-" ++ (toString msgid) ++ "-" ++ (toString rpcids) ++"] " ++ (toString msg)
-      ClientChildMsg parentRunCycle parentid msgid -> "(p" ++ (toString parentRunCycle) ++")[ChildMsg-"++ (toString cid) ++ "-(" ++ (toString parentid) ++ "," ++ (toString msgid) ++ ")-" ++ (toString rpcids) ++"] " ++ (toString msg)
-      ClientRPCchildMsg parentRunCycle parentid rpcid msgid -> "(p" ++ (toString parentRunCycle) ++")[RPCchildMsg-"++ (toString cid) ++ "-(" ++ (toString rpcid) ++ "," ++ (toString msgid) ++ ")-" ++ (toString rpcids) ++"] " ++ (toString msg)
+    Init rpcids -> "[Init]"
+    MsgEvent msgType rpcids msg -> "[Msg] " ++ (toString msg)
 
 serverEventView : RunCycle -> ServerEventType serverModel serverMsg remoteServerMsg -> String
 serverEventView runCycle event = "(" ++ (toString runCycle) ++ ")" ++
   case event of
     InitServerEvent -> "[Init-Server]"
-    ServerMsgEvent msgtype msg -> case msgtype of
-      NewServerMsg msgid -> "[NewServerMsg](" ++ (toString msgid) ++ ")" ++ (toString msg)
-      ServerChildMsg parentRunCycle parentid msgid -> "(p" ++ (toString parentRunCycle) ++")[ChildServerMsg](" ++ (toString parentid) ++ "," ++ (toString msgid) ++ ")" ++ (toString msg)
-      RPCserverMsg parentRunCycle cid rpcid rpcmsgid -> "(p" ++ (toString parentRunCycle) ++")[RPCserverMsg](" ++ (toString cid) ++ "," ++ (toString rpcid) ++ "," ++ (toString rpcmsgid) ++")" ++ (toString msg)
-      RPCchildServerMsg parentRunCycle (cid,rpcid, rpcmsgid) msgid -> "(p" ++ (toString parentRunCycle) ++")[RPCchildServerMsg]((" ++ (toString cid) ++ "," ++ (toString rpcid) ++ "," ++ (toString rpcmsgid) ++")," ++ (toString msgid) ++")" ++ (toString msg)
-    ServerRPCevent parentRunCycle cid parentid rpcid _ msg -> "(p" ++ (toString parentRunCycle) ++")[RP-" ++ (toString cid) ++"-" ++ "," ++ "client-parent-id:" ++ (toString parentid) ++ "," ++(toString rpcid) ++"] " ++ (toString msg)
+    ServerMsgEvent msgtype msg -> "[Server-Msg] " ++ (toString msg)
+    ServerRPCevent parentRunCycle cid parentid rpcid _ msg -> "[RPC] " ++ (toString msg)
 
 serverActions : ServerDebuggerModel serverModel serverMsg remoteServerMsg model msg -> ActionProps (Msg model msg serverModel serverMsg remoteServerMsg) -> Html (Msg model msg serverModel serverMsg remoteServerMsg)
 serverActions model props = Html.div [] [
