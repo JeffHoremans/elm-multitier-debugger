@@ -917,13 +917,13 @@ eventView runCycle event = case event of
 --     ServerRPCevent parentRunCycle cid parentid rpcid _ msg -> "(p" ++ (toString parentRunCycle) ++")[RP-" ++ (toString cid) ++"-" ++ "," ++ "client-parent-id:" ++ (toString parentid) ++ "," ++(toString rpcid) ++"] " ++ (toString msg)
 
 clientEventView : RunCycle -> ClientId -> ClientEventType msg -> String
-clientEventView runCycle cid event = "(" ++ (toString runCycle) ++ ")" ++
+clientEventView runCycle cid event = --"(" ++ (toString runCycle) ++ ")" ++
   case event of
     Init rpcids -> "[Init]"
     MsgEvent msgType rpcids msg -> "[Msg] " ++ (toString msg)
 
 serverEventView : RunCycle -> ServerEventType serverModel serverMsg remoteServerMsg -> String
-serverEventView runCycle event = "(" ++ (toString runCycle) ++ ")" ++
+serverEventView runCycle event = --"(" ++ (toString runCycle) ++ ")" ++
   case event of
     InitServerEvent -> "[Init-Server]"
     ServerMsgEvent msgtype msg -> "[Server-Msg] " ++ (toString msg)
