@@ -366,7 +366,7 @@ resumeServerFromPrevious previous serverModel = let debugger = serverModel.debug
         |> (\(model,clients) -> ((model,Cmd.none),clients))
         |> checkPaused previous (Array.toList serverModel.debugger.messagesReceivedDuringPaused)
      in let newDebugger = newServerModel.debugger in
-      { newServerModel | debugger = { newDebugger | state = Running, previous = Maybe.Nothing }}
+      { newServerModel | debugger = { newDebugger | state = Running, previous = Maybe.Nothing, messagesReceivedDuringPaused = Array.empty }}
         ! [Cmd.map (ServerAppMsg previous.parentMsg) previous.cmd, newServerCmd, broadcastResumeFromPreviousAction previous currentClients newClients newServerModel]
 
 checkEvents :
