@@ -379,19 +379,11 @@ checkEvents previous eventsToCheck goBackIndex (serverModel, clients) = case eve
         ServerEvent eventType ->
           let handleServerEvent parent serverMsg =
                 if TimeLine.isServerParentMember parent debugger.timeline then
-                  case TimeLine.getServerEventParentIndex eventType debugger.timeline of
-                    Just index -> case goBackIndex == index of
-                      False -> let (newServerModel,_) = updateServerAppModel parent serverMsg serverModel in (newServerModel,clients)
-                      True -> (serverModel,clients) -- Message discarded...
-                    _ -> (serverModel,clients) -- Not possible
+                  let (newServerModel,_) = updateServerAppModel parent serverMsg serverModel in (newServerModel,clients)
                 else (serverModel,clients)  -- Message discarded...
               handleServerRPCevent parentRunCycle cid parentid rpcid updateAppModel msg =
                 if TimeLine.isClientParentMember cid (RegularMsg parentRunCycle parentid) debugger.timeline then
-                  case TimeLine.getServerEventParentIndex eventType debugger.timeline of
-                    Just index -> case goBackIndex == index of
-                      False -> let (newServerModel,_) = updateServerAppModelFromRPC updateAppModel parentRunCycle cid parentid rpcid msg serverModel in (newServerModel,clients)
-                      True -> (serverModel,clients) -- Message discarded...
-                    _ -> (serverModel,clients) -- Not possible
+                  let (newServerModel,_) = updateServerAppModelFromRPC updateAppModel parentRunCycle cid parentid rpcid msg serverModel in (newServerModel,clients)
                 else (serverModel,clients)  -- Message discarded...
 
           in case eventType of
@@ -405,22 +397,17 @@ checkEvents previous eventsToCheck goBackIndex (serverModel, clients) = case eve
         ClientEvent cid eventType ->
           let handleClientEvent parent msg =
             if TimeLine.isClientParentMember cid parent debugger.timeline then
-              case TimeLine.getClientEventParentIndex cid eventType debugger.timeline of
-                Just index -> case goBackIndex == index of
-                  False -> case Dict.get (toString cid) clients of
-                    Just (clientModel, clientCmd) ->
-                      let (newClientModel,newClientCmd) = updateAppModelWithoutEffects serverModel.updateClient msg parent cid clientModel in
-                        (serverModel, Dict.insert (toString cid) (newClientModel !! [clientCmd,newClientCmd]) clients)
-                    _ -> case Dict.get (toString cid) previous.clients of
-                          Just (cid, (previousAppModel, previousAppCmd, previousParentMsg, previousRpcMsgCount, previousMsgCount)) ->
-                            let clientModel = ClientDebuggerModel ClientPaused previousAppModel debugger.runCycle previousRpcMsgCount previousMsgCount in
-                              let (rpcWrappedModel, rpcWrappedCmd, _) = wrapRPCcmds cid previousParentMsg previousMsgCount clientModel previousAppCmd in
-                                let (newClientModel,newClientCmd) = updateAppModelWithoutEffects serverModel.updateClient msg parent cid rpcWrappedModel in
-                                  (serverModel,Dict.insert (toString cid) (newClientModel !! [rpcWrappedCmd,newClientCmd]) clients)
-                          _ -> (serverModel, clients)
-
-                  True -> (serverModel,clients) -- Message discarded...
-                _ -> (serverModel,clients) -- Not possible
+              case Dict.get (toString cid) clients of
+                Just (clientModel, clientCmd) ->
+                  let (newClientModel,newClientCmd) = updateAppModelWithoutEffects serverModel.updateClient msg parent cid clientModel in
+                    (serverModel, Dict.insert (toString cid) (newClientModel !! [clientCmd,newClientCmd]) clients)
+                _ -> case Dict.get (toString cid) previous.clients of
+                      Just (cid, (previousAppModel, previousAppCmd, previousParentMsg, previousRpcMsgCount, previousMsgCount)) ->
+                        let clientModel = ClientDebuggerModel ClientPaused previousAppModel debugger.runCycle previousRpcMsgCount previousMsgCount in
+                          let (rpcWrappedModel, rpcWrappedCmd, _) = wrapRPCcmds cid previousParentMsg previousMsgCount clientModel previousAppCmd in
+                            let (newClientModel,newClientCmd) = updateAppModelWithoutEffects serverModel.updateClient msg parent cid rpcWrappedModel in
+                              (serverModel,Dict.insert (toString cid) (newClientModel !! [rpcWrappedCmd,newClientCmd]) clients)
+                      _ -> (serverModel, clients)
             else (serverModel,clients)  -- Message discarded...
            in case eventType of
             Init ids -> (serverModel,clients) -- TODO
