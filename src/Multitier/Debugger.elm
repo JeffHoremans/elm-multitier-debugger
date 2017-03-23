@@ -110,7 +110,7 @@ wrapInitServer updateServer updateClient (serverModel, cmd) =
   { debugger =
     { state = Running
     , appModel = serverModel
-    , timeline = TimeLine.empty serverModel |> TimeLine.pushServerEvent runCycle rpcMsgCount (msgCount + 1) (InitServerEvent, serverModel, cmd, None)
+    , timeline = TimeLine.empty serverModel |> TimeLine.pushServerEvent runCycle rpcMsgCount (msgCount + 1) (InitServerEvent, serverModel, cmd, RegularServerMsg runCycle msgCount)
     , previous = Maybe.Nothing
     , messagesReceivedDuringPaused = Array.empty
     , resume = FromPaused
@@ -135,11 +135,15 @@ wrapUpdateServer updateServer = \serverMsg serverModel ->
       clients = serverModel.clients in
   let (newServerModel, newCmds) = case serverMsg of
     ServerAppMsg parent serverAppMsg ->
-      if TimeLine.isServerParentMember parent debugger.timeline then
-        case serverModel.debugger.state of
-          Running -> updateServerAppModel parent serverAppMsg serverModel
-          Paused -> storePausedMessage updateServer parent serverAppMsg serverModel
-      else serverModel ! [] -- Message discarded...
+      case serverModel.debugger.state of
+        Running -> case parent of
+          None -> updateServerAppModel parent serverAppMsg serverModel
+          _ -> if TimeLine.isServerParentMember parent debugger.timeline then
+            updateServerAppModel parent serverAppMsg serverModel
+          else serverModel ! [] -- Message discarded...
+        Paused -> if TimeLine.isServerParentMember parent debugger.timeline then
+          updateServerAppModel parent serverAppMsg serverModel
+        else serverModel ! [] -- Message discarded...
     OnClientConnect cid ->
       { serverModel | debugger =  { debugger | clientIds = (toString cid) :: debugger.clientIds }} ! [initializeClient serverModel cid]
     OnClientDisconnect cid ->
@@ -631,7 +635,10 @@ handleParentStillMember update cid parentMsg appMsg result cmodel = case cmodel.
 handleAppMsg : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> msg -> ParentMsg -> ClientId -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
 handleAppMsg update appMsg parentMsg cid cmodel = case cmodel.state of
   ClientUnvalid -> cmodel !! []
-  _ -> cmodel !! [performOnServer (IsParentStillMember cid parentMsg appMsg)]
+  ClientRunning -> case parentMsg of
+    NoParentMsg -> updateAppModel update appMsg parentMsg cid cmodel
+    _ -> cmodel !! [performOnServer (IsParentStillMember cid parentMsg appMsg)]
+  ClientPaused -> cmodel !! [performOnServer (IsParentStillMember cid parentMsg appMsg)]
 
 updateAppModel : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> msg -> ParentMsg -> ClientId -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
 updateAppModel update appMsg parentMsg cid cmodel =
