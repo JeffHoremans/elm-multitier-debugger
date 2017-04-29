@@ -864,6 +864,7 @@ timelineView smodel =
 
     serverLabel = Svg.text_ [x (toString labelOffset), y "20"] [Html.text "Server"]
     serverLine = Svg.line [x1 (toString offset), y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []
+    clientLabels = clients |> List.map (\(_,index) -> Svg.text_ [x (toString labelOffset), y (toString ((index * 40) + 60))] [Html.text ("Client " ++ (toString index))])
     clientLines =
       clients
         |> List.map (\(_,index) -> Svg.line [x1 (toString offset), y1 (toString ((index * 40) + 60)), x2 "100%", y2 (toString ((index * 40) + 60)), style [("stroke", "black"), ("stroke-width", "3")]] [])
