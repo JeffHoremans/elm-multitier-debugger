@@ -8,7 +8,7 @@ import Html exposing (Html)
 import Html.Attributes exposing (checked, style, disabled, size, value, type_, selected, id)
 import Html.Events exposing (onClick, onCheck, on)
 import Svg
-import Svg.Attributes exposing (width, height, viewBox, x1, x2, y1, y2, r, cx, cy, fill, stroke, d)
+import Svg.Attributes exposing (width, height, viewBox, x, y, x1, x2, y1, y2, r, cx, cy, fill, stroke, d)
 import Array exposing (Array)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
@@ -798,7 +798,8 @@ timelineView smodel =
     previousIndex = case smodel.previous of
       Just previous -> previous.index
       _ -> (TimeLine.length smodel.timeline) - 1
-    offset = 10
+    offset = 20
+    labelOffset = 10
     eventSpacing = 25
     circles =
       TimeLine.view smodel.timeline
@@ -861,6 +862,7 @@ timelineView smodel =
         |> List.concat
 
 
+    serverLabel = Svg.text_ [x (toString labelOffset), y "20"] [Html.text "Server"]
     serverLine = Svg.line [x1 (toString offset), y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []
     clientLines =
       clients
@@ -869,6 +871,7 @@ timelineView smodel =
   Html.div [id "timeline", style [("overflow-x", "auto")]] [
     Svg.svg [ width (toString ((((TimeLine.length smodel.timeline) - 1) * eventSpacing) + (offset * 2))), height (toString (40 * ((TimeLine.numberOfClients smodel.timeline) + 1)))]
       (List.concat [
+        [serverLabel],
         [serverLine],
         clientLines,
         circles ])]
