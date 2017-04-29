@@ -798,7 +798,7 @@ timelineView smodel =
     previousIndex = case smodel.previous of
       Just previous -> previous.index
       _ -> (TimeLine.length smodel.timeline) - 1
-    offset = 20
+    offset = 100
     labelOffset = 10
     eventSpacing = 25
     circles =
