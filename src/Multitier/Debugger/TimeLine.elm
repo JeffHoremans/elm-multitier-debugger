@@ -20,6 +20,7 @@ module Multitier.Debugger.TimeLine
     , getRPCeventIndex
     , getServerEventParentIndex
     , isServerParentMember
+    , getFirstClientIndex
     , getClientEventParentIndex
     , isClientParentMember
     , view )
@@ -217,6 +218,21 @@ getServerEventParentIndexHelp eventType (TimeLine {serverParentIndices, clientPa
 
 getClientEventParentIndex : ClientId -> ClientEventType msg -> TimeLine serverModel serverMsg remoteServerMsg model msg -> Maybe Int
 getClientEventParentIndex cid eventType timeline = Maybe.map (\(_,index) -> index) (getClientEventParentIndexHelp cid eventType timeline)
+
+getFirstClientIndex : ClientId -> TimeLine serverModel serverMsg remoteServerMsg model msg -> Maybe Int
+getFirstClientIndex cid (TimeLine {events}) = events
+  |> Array.map (\(_,event,_) -> event)
+  |> Array.toIndexedList
+  |> getFirstClientIndexHelp cid
+
+getFirstClientIndexHelp : ClientId -> List (Int, Event serverModel serverMsg remoteServerMsg msg) -> Maybe Int
+getFirstClientIndexHelp cid events = case events of
+  [] -> Nothing
+  (index,event) :: otherEvents -> case event of
+    ClientEvent clientId _ -> case cid == clientId of
+      True -> Just index
+      False -> getFirstClientIndexHelp cid otherEvents
+    _ -> getFirstClientIndexHelp cid otherEvents
 
 getClientEventParentIndexHelp : ClientId -> ClientEventType msg -> TimeLine serverModel serverMsg remoteServerMsg model msg -> Maybe (RunCycle, Int)
 getClientEventParentIndexHelp cid eventType (TimeLine {clientParentIndices,serverParentIndices}) = case eventType of

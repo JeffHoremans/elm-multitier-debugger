@@ -866,8 +866,12 @@ timelineView smodel =
     serverLine = Svg.line [x1 (toString offset), y1 "20", x2 "100%", y2 "20", style [("stroke", "black"), ("stroke-width", "3")]] []
     clientLabels = clients |> List.map (\(_,index) -> Svg.text_ [x (toString labelOffset), y (toString ((index * 40) + 60))] [Html.text ("Client " ++ (toString (index + 1)))])
     clientLines =
-      clients
-        |> List.map (\(_,index) -> Svg.line [x1 (toString offset), y1 (toString ((index * 40) + 60)), x2 "100%", y2 (toString ((index * 40) + 60)), style [("stroke", "black"), ("stroke-width", "3")]] [])
+      TimeLine.clients smodel.timeline
+        |> List.indexedMap (\index cid -> (index,cid))
+        |> List.map (\(index,cid) -> let startIndex = case TimeLine.getFirstClientIndex cid smodel.timeline of
+          Just firstIndex -> (index * eventSpacing) + offset
+          _ -> offset
+            in Svg.line [x1 (toString startIndex), y1 (toString ((index * 40) + 60)), x2 "100%", y2 (toString ((index * 40) + 60)), style [("stroke", "black"), ("stroke-width", "3")]] [])
   in
   Html.div [id "timeline", style [("overflow-x", "auto")]] [
     Svg.svg [ width (toString ((((TimeLine.length smodel.timeline) - 1) * eventSpacing) + (offset * 2))), height (toString (40 * ((TimeLine.numberOfClients smodel.timeline) + 1)))]
