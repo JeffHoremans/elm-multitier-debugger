@@ -868,8 +868,8 @@ timelineView smodel =
     clientLines =
       TimeLine.clients smodel.timeline
         |> List.indexedMap (\index cid -> (index,cid))
-        |> List.map (\(index,cid) -> let startIndex = let derp = Debug.log "" (TimeLine.getFirstClientIndex cid smodel.timeline) in case derp of
-          Just firstIndex -> (index * eventSpacing) + offset
+        |> List.map (\(index,cid) -> let startIndex = case TimeLine.getFirstClientIndex cid smodel.timeline of
+          Just firstIndex -> (firstIndex * eventSpacing) + offset
           _ -> offset
             in Svg.line [x1 (toString startIndex), y1 (toString ((index * 40) + 60)), x2 "100%", y2 (toString ((index * 40) + 60)), style [("stroke", "black"), ("stroke-width", "3")]] [])
   in
