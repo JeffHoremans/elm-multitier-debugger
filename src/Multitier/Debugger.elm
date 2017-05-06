@@ -740,12 +740,11 @@ wrapView appView = \model -> case model of
     let view divAtt appModel =
       Html.div [] [
         Html.div divAtt [
-          Html.map (AppMsg NoParentMsg) (appView appModel)], -- TODO if previous then previousModel
+          Html.map (AppMsg NoParentMsg) (appView appModel)], 
         Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
           Html.button [onClick SwitchDebugger] [Html.text "Switch to server debugger"],
           Html.pre [] [
             Html.text (toString appModel)]
-          --,eventsView cmodel
           ]]
       in case cmodel.state of
         ClientRunning ->
@@ -776,11 +775,6 @@ wrapView appView = \model -> case model of
             Just previous -> previous.appModel
             _ -> smodel.appModel))],
         eventsView smodel,
-        -- Html.pre [] [Html.text (toString (Array.map (\message -> case message of
-        --   PausedServerAppMsg parent serverMsg -> ("PausedServerAppMsg parent:(" ++ (toString parent) ++")-" ++ (toString serverMsg))
-        --   PausedRemoteServerAppMsg parentRunCycle cid _ parentid rpcid remoteServerMsg -> ("PausedRemoteServerAppMsg cid:(" ++ (toString cid) ++ "," ++ (toString rpcid) ++")-" ++ (toString remoteServerMsg))
-        --   PausedClientAppMsg (cid,parentMsg,msg) -> ("PausedClientAppMsg cid:(" ++ (toString cid) ++ ",parent:"  ++ (toString parentMsg) ++ ")-" ++ (toString msg))
-        --    ) smodel.messagesReceivedDuringPaused))],
         timelineView smodel]
       in case smodel.state of
         Running ->
@@ -904,26 +898,6 @@ eventView runCycle event = case event of
   ClientEvent cid cevent -> clientEventView runCycle cid cevent
   ClientCloseEvent cid -> "[Close-"++ (toString cid) ++"]"
   ServerEvent sevent -> serverEventView runCycle sevent
-
--- clientEventView : RunCycle -> ClientId -> ClientEventType msg -> String
--- clientEventView runCycle cid event = "(" ++ (toString runCycle) ++ ")" ++
---   case event of
---     Init rpcids -> "[Init-"++ (toString cid) ++ "-" ++ (toString rpcids) ++"]"
---     MsgEvent msgType rpcids msg -> case msgType of
---       NewClientMsg msgid -> "[NewMsg-"++ (toString cid) ++ "-" ++ (toString msgid) ++ "-" ++ (toString rpcids) ++"] " ++ (toString msg)
---       ClientChildMsg parentRunCycle parentid msgid -> "(p" ++ (toString parentRunCycle) ++")[ChildMsg-"++ (toString cid) ++ "-(" ++ (toString parentid) ++ "," ++ (toString msgid) ++ ")-" ++ (toString rpcids) ++"] " ++ (toString msg)
---       ClientRPCchildMsg parentRunCycle parentid rpcid msgid -> "(p" ++ (toString parentRunCycle) ++")[RPCchildMsg-"++ (toString cid) ++ "-(" ++ (toString rpcid) ++ "," ++ (toString msgid) ++ ")-" ++ (toString rpcids) ++"] " ++ (toString msg)
---
--- serverEventView : RunCycle -> ServerEventType serverModel serverMsg remoteServerMsg -> String
--- serverEventView runCycle event = "(" ++ (toString runCycle) ++ ")" ++
---   case event of
---     InitServerEvent -> "[Init-Server]"
---     ServerMsgEvent msgtype msg -> case msgtype of
---       NewServerMsg msgid -> "[NewServerMsg](" ++ (toString msgid) ++ ")" ++ (toString msg)
---       ServerChildMsg parentRunCycle parentid msgid -> "(p" ++ (toString parentRunCycle) ++")[ChildServerMsg](" ++ (toString parentid) ++ "," ++ (toString msgid) ++ ")" ++ (toString msg)
---       RPCserverMsg parentRunCycle cid rpcid rpcmsgid -> "(p" ++ (toString parentRunCycle) ++")[RPCserverMsg](" ++ (toString cid) ++ "," ++ (toString rpcid) ++ "," ++ (toString rpcmsgid) ++")" ++ (toString msg)
---       RPCchildServerMsg parentRunCycle (cid,rpcid, rpcmsgid) msgid -> "(p" ++ (toString parentRunCycle) ++")[RPCchildServerMsg]((" ++ (toString cid) ++ "," ++ (toString rpcid) ++ "," ++ (toString rpcmsgid) ++")," ++ (toString msgid) ++")" ++ (toString msg)
---     ServerRPCevent parentRunCycle cid parentid rpcid _ msg -> "(p" ++ (toString parentRunCycle) ++")[RP-" ++ (toString cid) ++"-" ++ "," ++ "client-parent-id:" ++ (toString parentid) ++ "," ++(toString rpcid) ++"] " ++ (toString msg)
 
 clientEventView : RunCycle -> ClientId -> ClientEventType msg -> String
 clientEventView runCycle cid event = --"(" ++ (toString runCycle) ++ ")" ++
