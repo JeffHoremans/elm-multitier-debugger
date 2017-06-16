@@ -641,7 +641,7 @@ resumeClientFromPrevious : ClientId  -> Maybe (ClientDebuggerModel model, Multit
 resumeClientFromPrevious cid maybeNewModel cmodel = case cmodel.state of
   ClientUnvalid -> cmodel !! []
   _ -> case maybeNewModel of
-    Just (newModel,newCmd) -> { newModel | state = ClientRunning, runCycle = newModel.runCycle + 1 } !! [newCmd]
+    Just (newModel,newCmd) -> { newModel | state = ClientRunning } !! [newCmd]
     _ -> { cmodel | state = ClientRunning, runCycle = cmodel.runCycle + 1 } !! []
 
 handleParentStillMember : (msg -> model -> ( model, MultitierCmd remoteServerMsg msg )) -> ClientId -> ParentMsg -> msg -> Result Error Bool -> ClientDebuggerModel model -> (ClientDebuggerModel model, MultitierCmd (RemoteServerMsg remoteServerMsg model msg) (Msg model msg serverModel serverMsg remoteServerMsg) )
@@ -740,7 +740,7 @@ wrapView appView = \model -> case model of
     let view divAtt appModel =
       Html.div [] [
         Html.div divAtt [
-          Html.map (AppMsg NoParentMsg) (appView appModel)], 
+          Html.map (AppMsg NoParentMsg) (appView appModel)],
         Html.div [style [("position", "fixed"), ("bottom", "0"), ("width", "100%")]] [
           Html.button [onClick SwitchDebugger] [Html.text "Switch to server debugger"],
           Html.pre [] [
